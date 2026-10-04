@@ -1,0 +1,67 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Confirms every loader can install and boot Minecraft 26.2 on a clean
+  # runner. This is the gate that catches loader or Mojang metadata changes
+  # before they reach a benchmark run.
+  loaders:
+    name: ${{ matrix.loader }} 26.2
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        loader: [fabric, neoforge, forge, paper]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify loader boots 26.2
+        run: python -m aiom.core.launcher ${{ matrix.loader }}
+
+      - name: Upload boot log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-log-${{ matrix.loader }}
+          path: .aiom/verify/${{ matrix.loader }}/logs/*.log
+          if-no-files-found: ignore
+
+  # Small smoke run so the benchmark harness itself is covered on every push.
+  # The full 100-project benchmark is expensive and is run on demand.
+  bench-smoke:
+    name: bench smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: PureBoot smoke
+        run: python -m aiom.bench.pureboot -n 2 --loaders neoforge --out reports/smoke.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-smoke-report
+          path: reports/smoke.json
+          if-no-files-found: ignore
