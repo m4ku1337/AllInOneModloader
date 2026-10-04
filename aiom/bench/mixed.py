@@ -42,6 +42,7 @@ class Row:
     counted: bool = True
     in_sample: bool = True
     size: int = 0
+    environment: str = "unknown"
 
 
 @dataclass
@@ -57,27 +58,41 @@ class MixedReport:
     passed: int = 0
     failed: int = 0
     unplaceable: int = 0
+    client_only: int = 0
     rows: list[Row] = field(default_factory=list)
     runtime_results: dict = field(default_factory=dict)
     duration_s: float = 0.0
     started_at: str = ""
 
     @property
+    def eligible(self) -> int:
+        """Projects the benchmark actually judges.
+
+        A project Modrinth tags ``client_only`` states that no server can run
+        it. Counting those as failures would measure Modrinth's tagging, not
+        the loader, so they are reported separately and left out of the
+        denominator.
+        """
+        return sum(1 for r in self.rows if r.counted)
+
+    @property
     def rate(self) -> float:
-        return self.passed / self.sampled if self.sampled else 0.0
+        return self.passed / self.eligible if self.eligible else 0.0
 
     @property
     def meets(self) -> bool:
-        return self.sampled > 0 and self.rate >= self.threshold
+        return self.eligible > 0 and self.rate >= self.threshold
 
     def to_dict(self) -> dict:
         return {
             "minecraft": self.mc, "seed": self.seed, "target": self.target,
             "threshold": self.threshold,
-            "sampled": self.sampled, "roots": self.roots,
+            "sampled": self.sampled, "eligible": self.eligible,
+            "roots": self.roots,
             "closure_nodes": self.closure, "installed": self.installed,
             "passed": self.passed, "failed": self.failed,
             "unplaceable": self.unplaceable,
+            "client_only": self.client_only,
             "mixed_load_rate": round(self.rate, 4),
             "meets_threshold": self.meets,
             "runtime_results": self.runtime_results,
@@ -123,9 +138,47 @@ def run(n: int = 100, seed: int = SEED, mc: str = MC,
 
     print("[2/6] 解析依赖闭包与生态归位 ...")
     resolved = placement.closure(roots, mc=mc)
-    rep.closure = len(resolved)
     by_id = {r.project_id: r for r in resolved}
-    print(f"      闭包 {len(resolved)} 个节点（含依赖）")
+
+    # Build the row set before anything touches the disk: every sampled project
+    # is reported, even ones that never make it onto a disk, so the report is a
+    # faithful account of the draw.
+    rows: list[Row] = []
+    for i, (pid, slug, title, ptype) in enumerate(roots):
+        r = by_id.get(pid)
+        if r is None:
+            rows.append(Row(i, slug, title, ptype, "", "", "", "",
+                            "fail", "could not resolve a 26.2 build"))
+        elif r.environment == "client_only":
+            # Author-declared: no server runtime can host this. Reported in
+            # full, but excluded from the denominator -- counting it would
+            # measure Modrinth's tagging rather than the loader.
+            rows.append(Row(i, slug, title, ptype, r.version_number, "", "",
+                            r.filename, "skipped",
+                            "Modrinth marks this 26.2 build client_only; "
+                            "no server loader can host it",
+                            counted=False, environment=r.environment))
+        elif not r.placeable:
+            rows.append(Row(i, slug, title, ptype, r.version_number, "", "",
+                            r.filename, "fail", r.reason or "not placeable",
+                            environment=r.environment))
+        else:
+            rows.append(Row(i, slug, title, ptype, r.version_number, r.host,
+                            r.chosen_loader, r.filename, size=r.size,
+                            environment=r.environment))
+    rep.sampled = len(rows)
+    rep.client_only = sum(1 for r in rows if r.outcome == "skipped")
+    rep.unplaceable = sum(1 for r in rows
+                          if r.outcome == "fail" and r.environment != "client_only"
+                          and not r.host)
+
+    # Nothing client-side may reach a mods or plugins directory. Dependency
+    # nodes are filtered too: a client-only library breaks its dependents just
+    # as thoroughly as it breaks itself.
+    resolved = [r for r in resolved if r.environment != "client_only"]
+    rep.closure = len(resolved)
+    print(f"      闭包 {len(resolved)} 个节点（含依赖，"
+          f"已剔除 {rep.client_only} 个 client_only）")
 
     print("[3/6] 准备实例 ...")
     info = inst_mod.build(root, mc)
@@ -136,23 +189,6 @@ def run(n: int = 100, seed: int = SEED, mc: str = MC,
     rep.installed = placed
     print(f"      neoforge={placed['neoforge']} "
           f"paper={placed['paper']} failed={placed['failed']}")
-
-    # Build the row set: every sampled project is reported, even if it never
-    # made it onto disk, so the denominator stays honest.
-    rows: list[Row] = []
-    for i, (pid, slug, title, ptype) in enumerate(roots):
-        r = by_id.get(pid)
-        if r is None:
-            rows.append(Row(i, slug, title, ptype, "", "", "", "",
-                            "fail", "could not resolve a 26.2 build"))
-        elif not r.placeable:
-            rep.unplaceable += 1
-            rows.append(Row(i, slug, title, ptype, r.version_number, "", "",
-                            r.filename, "fail", r.reason or "not placeable"))
-        else:
-            rows.append(Row(i, slug, title, ptype, r.version_number, r.host,
-                            r.chosen_loader, r.filename, size=r.size))
-    rep.sampled = len(rows)
 
     print("[5/6] 启动各运行时并判定 ...")
     for rt in ("neoforge", "paper"):
@@ -192,8 +228,11 @@ def run(n: int = 100, seed: int = SEED, mc: str = MC,
             row.evidence = v.evidence
 
     # A project that loaded as a dependency but was not sampled still counts
-    # toward the closure, never toward the headline rate.
+    # toward the closure, never toward the headline rate. `skipped` rows are
+    # reported but excluded, so only judged projects move the counters.
     for row in rows:
+        if not row.counted:
+            continue
         if row.outcome == "pass":
             rep.passed += 1
         else:
@@ -204,8 +243,10 @@ def run(n: int = 100, seed: int = SEED, mc: str = MC,
     rep.duration_s = time.time() - t0
     rep.save(out)
     print(f"\n混合共存通过率: {rep.rate * 100:.1f}%  "
-          f"({rep.passed}/{rep.sampled})  阈值 {THRESHOLD * 100:.0f}  "
+          f"({rep.passed}/{rep.eligible})  阈值 {THRESHOLD * 100:.0f}%  "
           f"{'达标' if rep.meets else '未达标'}")
+    print(f"已报告 {rep.sampled} 个项目，其中 client_only 跳过 "
+          f"{rep.client_only} 个，无法归位 {rep.unplaceable} 个")
     print(f"报告: {out}")
     return rep
 

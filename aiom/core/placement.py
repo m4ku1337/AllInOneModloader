@@ -79,6 +79,7 @@ class Resolved:
     size: int = 0
     required: list[str] = field(default_factory=list)
     reason: str = ""        # why not placeable, when host == ""
+    environment: str = "unknown"
 
     @property
     def placeable(self) -> bool:
@@ -92,6 +93,7 @@ class Resolved:
             "loaders": self.loaders, "host": self.host,
             "chosen_loader": self.chosen_loader, "file": self.filename,
             "size": self.size, "required": self.required,
+            "environment": self.environment,
             "placeable": self.placeable, "reason": self.reason,
         }
 
@@ -135,6 +137,10 @@ def resolve(project_id: str, slug: str = "", title: str = "",
                  title=title or slug or project_id, project_type=ptype)
     r.families = sorted({FAMILY[l] for l in by_loader if l in FAMILY})
     r.loaders = sorted(by_loader)
+    # Any 26.2 build's environment tag will do: a project that ships a
+    # client_only build for 26.2 has told us no server runtime can host it.
+    r.environment = next((v.get("environment", "unknown")
+                          for v in by_loader.values()), "unknown")
 
     # Each entry is (family, loaders-in-preference-order). The family is always
     # the first loader in its own tuple, so it is read from there rather than
@@ -155,6 +161,7 @@ def resolve(project_id: str, slug: str = "", title: str = "",
             r.url = f.get("url", "")
             r.sha1 = (f.get("hashes") or {}).get("sha1", "")
             r.size = f.get("size", 0)
+            r.environment = v.get("environment", "unknown")
             r.required = [d.get("project_id") or d.get("slug")
                           for d in v.get("dependencies", [])
                           if d.get("dependency_type") == "required"
