@@ -53,12 +53,22 @@ class Isolation:
     rounds: int = 0
     removed: list[str] = None      # filenames pulled to make the boot work
     blamed: list[str] = None       # mod ids named by the loader
+    # Filenames removed only because a binary split had to shrink the search
+    # space. These are NOT proven guilty and must not be reported as failures.
+    unverified: list[str] = None
 
     def __post_init__(self):
         if self.removed is None:
             self.removed = []
         if self.blamed is None:
             self.blamed = []
+        if self.unverified is None:
+            self.unverified = []
+
+    @property
+    def guilty(self) -> list[str]:
+        """Jars the loader actually named -- the only real failures."""
+        return [f for f in self.removed if f not in set(self.unverified)]
 
 
 def find_culprits(log_text: str) -> list[str]:
@@ -135,8 +145,19 @@ def _clear_world_lock(rt_dir: Path) -> None:
 
 
 def isolate(rt: str, root: Path, mc: str, timeout: int = 420,
-            max_rounds: int = 25) -> Isolation:
+            max_rounds: int = 60) -> Isolation:
     """Boot the runtime, removing blamed jars until it starts.
+
+    Two very different removal reasons are tracked separately, because only one
+    of them is evidence of a broken project:
+
+    * **Named** -- the loader pointed at a mod id in the log. That jar broke the
+      instance and is reported as a failure.
+    * **Split** -- nobody was named, so the search space was halved to make
+      progress. Those jars are *unverified*, not guilty. At 90-jar scale a
+      single unnamed crash would otherwise evict half the sample and, if those
+      removals were reported as failures, manufacture a pass rate near 50% out
+      of one crash. They go back on disk once the boot succeeds.
 
     Files that were removed are moved aside (not deleted) so a failure can
     still be explained after the fact.
@@ -151,7 +172,25 @@ def isolate(rt: str, root: Path, mc: str, timeout: int = 420,
         ok, log, detail = _boot(rt, root, mc, timeout)
         res.log, res.detail = log, detail
         if ok:
-            res.booted = True
+            restored = _restore_unverified(res=res, mods_dir=mods_dir,
+                                           quarantine=quarantine)
+            if restored:
+                # The log we just captured was produced *without* those jars, so
+                # it cannot speak for them. One more boot gives a log that
+                # covers everything currently on disk, which is the only log the
+                # per-project verdicts may be read from.
+                ok2, log2, detail2 = _boot(rt, root, mc, timeout)
+                res.rounds += 1
+                res.log, res.detail = log2, detail2
+                if not ok2:
+                    # Restoring reintroduced the crash: keep the reduced set.
+                    for name in restored:
+                        src = mods_dir / name
+                        if src.exists():
+                            _evict(res, src, quarantine, named=False)
+                        res.removed.remove(name)
+                        res.unverified.append(name)
+            res.booted = ok
             return res
         culprits = find_culprits(log)
         for c in culprits:
@@ -162,21 +201,51 @@ def isolate(rt: str, root: Path, mc: str, timeout: int = 420,
         # names several ids while only one is actually fatal.
         jar = next((_jar_for_mod_id(mods_dir, c) for c in culprits
                     if _jar_for_mod_id(mods_dir, c)), None)
-        if jar is None:
-            # Nobody is named: fall back to a binary split so one unnamed
-            # crash cannot stall the run.
-            jars = sorted(mods_dir.glob("*.jar"))
-            if len(jars) < 2:
-                return res
-            half = len(jars) // 2
-            for j in jars[half:]:
-                shutil.move(str(j), str(quarantine / j.name))
-                res.removed.append(j.name)
-            res.blamed.append(f"<binary split: removed {len(jars) - half}>")
+        if jar is not None:
+            _evict(res, jar, quarantine, named=True)
             continue
-        shutil.move(str(jar), str(quarantine / jar.name))
-        res.removed.append(jar.name)
+        # Nobody is named: fall back to a binary split so one unnamed
+        # crash cannot stall the run.
+        jars = sorted(mods_dir.glob("*.jar"))
+        if len(jars) < 2:
+            return res
+        half = len(jars) // 2
+        for j in jars[half:]:
+            _evict(res, j, quarantine, named=False)
+        res.blamed.append(f"<binary split: removed {len(jars) - half}>")
     return res
+
+
+def _evict(res: Isolation, jar: Path, quarantine: Path, *, named: bool) -> None:
+    shutil.move(str(jar), str(quarantine / jar.name))
+    res.removed.append(jar.name)
+    if not named:
+        res.unverified.append(jar.name)
+
+
+def _restore_unverified(*, res: Isolation, mods_dir: Path,
+                        quarantine: Path) -> list[str]:
+    """Put split-removed jars back so the survivors' log is not their log.
+
+    The successful boot happened *without* the unverified jars, so their fate is
+    genuinely unknown. Leaving them out would quietly shrink the denominator in
+    the project's favour; putting them back lets the next boot decide.
+
+    Returns the names that were restored.
+    """
+    restored: list[str] = []
+    for name in list(res.unverified):
+        src = quarantine / name
+        dst = mods_dir / name
+        try:
+            if src.exists() and not dst.exists():
+                shutil.move(str(src), str(dst))
+                res.removed.remove(name)
+                restored.append(name)
+        except OSError:
+            continue
+    res.unverified.clear()
+    return restored
 
 
 def restore(rt_dir: Path) -> int:

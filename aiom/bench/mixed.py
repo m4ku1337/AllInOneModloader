@@ -206,19 +206,24 @@ def run(n: int = 100, seed: int = SEED, mc: str = MC,
         rep.runtime_results[rt] = {
             "booted": iso.booted, "detail": iso.detail,
             "rounds": iso.rounds, "removed": iso.removed,
-            "blamed": iso.blamed, "log": iso.log,
+            "blamed": iso.blamed, "unverified": iso.unverified,
+            "log": iso.log,
         }
         print(f"      {rt}: booted={iso.booted} rounds={iso.rounds} "
-              f"removed={len(iso.removed)} blamed={','.join(iso.blamed) or '-'}")
+              f"guilty={len(iso.guilty)} unverified={len(iso.unverified)} "
+              f"blamed={','.join(iso.blamed) or '-'}")
 
         for row in rows:
             if row.host != rt:
                 continue
             fname = Path(row.file).name
-            if fname in iso.removed:
+            # Only jars the loader named are failures. A jar dropped by the
+            # binary split was never proven guilty, and at 90-jar scale one
+            # unnamed crash would otherwise take half the sample down with it.
+            if fname in set(iso.guilty):
                 row.outcome = "fail"
-                row.reason = ("broke the shared instance and was isolated: "
-                              + ",".join(iso.blamed)[:120])
+                row.reason = ("broke the shared instance and was named by the "
+                              "loader: " + ",".join(iso.blamed)[:120])
                 continue
             if row.outcome == "fail":
                 continue
