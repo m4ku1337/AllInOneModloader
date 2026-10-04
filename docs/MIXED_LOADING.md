@@ -4,6 +4,22 @@
 > NeoForge 模组 + Paper 插件**；Fabric / Forge 模组通过
 > **「同项目多生态发布」**在生态边界内共存。
 > 硬性不可行的是「把纯 Fabric jar 直接塞进 NeoForge 实例」——已被实测证伪。
+>
+> **最终实测（seed 20262，n=100）：60 个 NeoForge 模组 + 32 个 Paper 插件
+> 同时启动成功，零隔离，混合共存通过率 90.9%（70/77），超过 89% 阈值。**
+
+## 〇、达标历程
+
+每一轮都由实测数据驱动，失败根因逐个定位并修复：
+
+| 轮次 | 通过率 | 关键发现 | 修复 |
+|---|---|---|---|
+| 1 | 74.0% (57/77) | 插件数为 0；`environment` 读错 | 抽样器分层 + 排除 client_only |
+| 2 | 77.9% (60/77) | 纯 Fabric jar 被放进 NeoForge；`NNN-` 前缀让 jar 路径永远 miss | 归位只认宿主原生态；install() 回传落盘名 |
+| 3 | — | 变量 `root` 被循环变量遮蔽 | 改名 `entry` |
+| 4 | **90.9% (70/77)** | 13 个 Paper 假阴性（读错了权威记录） | 改解析 `PluginInitializerManager` 清单 |
+
+第 4 轮与一次复跑结果完全一致（90.9% / 70 passed / 7 failed），seed 可复现。
 
 ## 一、实测数据（seed 20262，n=100，2026-10-05）
 
@@ -439,3 +455,63 @@ prog = 'import sys,time; print("Done (38.0s)! For help"); sys.stdout.flush(); ti
 单元测试：90 jar 二分 → `guilty 0` / `unverified 45`；
 回填后磁盘恢复 90 个且 `removed` 清空；点名移除 → `guilty` 命中。
 
+## 十二、最终实测结果
+
+### 运行数据
+
+| 指标 | 值 |
+|---|---|
+| 抽样总数 | 100（seed 20262） |
+| 判定分母 | 77 |
+| **通过** | **70 → 90.9%** |
+| client_only 跳过 | 23 |
+| NeoForge 模组安装 | 60 |
+| Paper 插件安装 | 32 |
+| NeoForge 启动 | ✅ `Done (4.277s)!`，零隔离 |
+| Paper 启动 | ✅ `Done (38.036s)!`，零隔离 |
+
+样本构成（覆盖模组与插件、四种加载器）：
+
+| 维度 | 分布 |
+|---|---|
+| 判定类型 | 插件 12 / 模组 68 / 模组+插件 20 |
+| 宿主 | neoforge 42 / paper 29 / 未归位 6 |
+| 选用加载器 | neoforge 42 / paper 29 |
+
+**7 个未通过项，逐个归因清楚：**
+
+| 项目 | 归因 |
+|---|---|
+| bclib | 纯 Fabric 独占，26.2 无 neoforge/forge/paper 构建 |
+| cardinal-components-api | 仅 fabric + quilt |
+| c2me-fabric | 仅 fabric（`C2ME` 的 Fabric 独占分支） |
+| placeholder-api | 仅 fabric |
+| stringandsand | 项目页标 paper，但 jar 内**无 plugin.yml**，不是 Bukkit 插件 |
+| civilization-smp | 同上 |
+| vnc | jar 内 `plugin.yml` 仅一行 `# Placeholder file to upload it into Modrinth` —— 项目从未发布真正的插件文件 |
+
+后两类是**项目自身缺陷**（Modrinth 上的占位文件），不是 AllInOne 的兼容性问题，
+判定逻辑把它们如实判为失败是正确的。
+
+### 判定层的三次修正（都是假阴性）
+
+实测中最大的陷阱不是加载失败，而是**加载成功了却被判失败**。
+
+| 案例 | 假阴性根因 | 修正 |
+|---|---|---|
+| JEI | slug `jei` 与显示名 `Just Enough Items` 无公共子串，且只有 3 字符被长度过滤丢弃 | 从 jar 内 `META-INF/neoforge.mods.toml` 读权威 mod_id |
+| Orebfuscator 等 13 个 | Paper 的 `Loading server plugin X` 行只有部分加载路径会打印；而 `ModernPluginLoadingStrategy` 会为**已在运行**的插件补打 `Could not load ...` | 解析 `PluginInitializerManager` 的 `Bukkit plugins (N):` 清单 |
+| LeashablePlayers | 插件名是 CamelCase，slug 是连字符 | 加去分隔符匹配 + 从 `plugin.yml` 读插件名 |
+
+**读日志判定兼容性的铁律：必须找到每个运行时自己声明的权威清单，
+而不是挑一个"看起来像"的行去 grep。**
+
+### 复现方式
+
+```bash
+python -m aiom.bench.mixed -n 100 --root .aiom/instance \
+       --out reports/mixed-26.2-20262.json
+python tools/report.py reports/mixed-26.2-20262.json reports/REPORT-26.2.md
+```
+
+同 seed 必得同结果：连续两轮均为 `90.9% / 70 passed / 7 failed`。

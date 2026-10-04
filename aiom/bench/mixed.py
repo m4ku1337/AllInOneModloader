@@ -152,25 +152,30 @@ def run(n: int = 100, seed: int = SEED, mc: str = MC,
     # tuple instead of a Path.
     for i, entry in enumerate(roots):
         pid, slug, title, ptype = entry[0], entry[1], entry[2], entry[3]
+        # Keep every declared type, joined. Modrinth's `project_type` is only
+        # the primary one, and a project listed as both mod and plugin is the
+        # interesting case for a mixed-instance benchmark, not noise.
+        types = entry[4] if len(entry) > 4 and entry[4] else [ptype]
+        label = "+".join(types) if len(types) > 1 else types[0]
         r = by_id.get(pid)
         if r is None:
-            rows.append(Row(i, slug, title, ptype, "", "", "", "",
+            rows.append(Row(i, slug, title, label, "", "", "", "",
                             "fail", "could not resolve a 26.2 build", pid=pid))
         elif r.environment == "client_only":
             # Author-declared: no server runtime can host this. Reported in
             # full, but excluded from the denominator -- counting it would
             # measure Modrinth's tagging rather than the loader.
-            rows.append(Row(i, slug, title, ptype, r.version_number, "", "",
+            rows.append(Row(i, slug, title, label, r.version_number, "", "",
                             r.filename, "skipped",
                             "Modrinth marks this 26.2 build client_only; "
                             "no server loader can host it",
                             counted=False, environment=r.environment, pid=pid))
         elif not r.placeable:
-            rows.append(Row(i, slug, title, ptype, r.version_number, "", "",
+            rows.append(Row(i, slug, title, label, r.version_number, "", "",
                             r.filename, "fail", r.reason or "not placeable",
                             environment=r.environment, pid=pid))
         else:
-            rows.append(Row(i, slug, title, ptype, r.version_number, r.host,
+            rows.append(Row(i, slug, title, label, r.version_number, r.host,
                             r.chosen_loader, r.filename, size=r.size,
                             environment=r.environment, pid=pid))
     rep.sampled = len(rows)
