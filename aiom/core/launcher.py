@@ -118,15 +118,67 @@ def boot(cmd: list[str], log: Path, timeout: int,
                 break
     finally:
         if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=25)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=10)
+            _stop_tree(proc, cwd)
     out = "".join(chunks)
     log.write_text(out, encoding="utf-8")
     return out, proc.returncode
+
+
+def _stop_tree(proc: subprocess.Popen, cwd: Path) -> None:
+    """Terminate the server and every JVM it spawned.
+
+    Plain `terminate()` is not enough here. Paper starts through paperclip,
+    which unpacks and then launches the real server as a *child* JVM; killing
+    the parent leaves that child holding `paper.jar`, `libraries/` and the world
+    lock. The next run then fails with "Device or resource busy" while deleting,
+    or `DirectoryLock.create` while booting, and neither error points at a
+    surviving process.
+
+    `taskkill /T` is tried first while we still know the pid, then a
+    command-line sweep runs unconditionally: by the time the parent has exited,
+    its pid no longer identifies the tree, so the only reliable handle left is
+    the instance path baked into the child's command line.
+    """
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                       capture_output=True, check=False)
+    else:
+        try:
+            import signal
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            proc.kill()
+    try:
+        proc.wait(timeout=25)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+    kill_stray_servers(str(Path(cwd).resolve()))
+
+
+def kill_stray_servers(instance_hint: str = "") -> int:
+    """Terminate leftover Minecraft server JVMs belonging to this workspace.
+
+    A run that was interrupted, or whose parent exited before its children, can
+    leave a server holding the world lock. Every later boot would then fail for
+    a reason unrelated to the mods under test. Only JVMs whose command line
+    points inside this workspace are touched, so unrelated Java work is safe.
+
+    Implementation notes live in `winproc`; the short version is that no
+    external tool is used, because every shell-based option failed silently
+    (`wmic` is gone; `taskkill /T` needs a parent that has already exited).
+    """
+    if os.name != "nt":
+        return 0
+    marker = instance_hint or str(Path(__file__).resolve().parents[2])
+    try:
+        from . import winproc
+        return len(winproc.kill_servers_under(marker))
+    except (ImportError, OSError):
+        return 0
 
 
 def _has_ready(text: str) -> bool:
