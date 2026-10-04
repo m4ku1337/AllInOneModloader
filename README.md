@@ -53,34 +53,60 @@ Minecraft 26.2 得到了四大生态的完整支持，本项目对它们逐一�
 > （pure）实例**中**真实启动（boot）**验证。它不靠把模组堆在一起取胜，
 > 而是靠排除干扰、逐个确认「这个模组在这个加载器上究竟能不能起来」。
 
-### 指标契约（两个指标严格分离，绝不混淆）
+### 指标契约
 
-- **`isolated_load_rate`（隔离加载率）** —— 每个被抽中的项目都在**独立的纯净实例**中安装。
-  当服务端**完整达到就绪状态**、**且日志中确实出现该项目**时，才判定为通过。
-  **89% 阈值作用于这个指标。**
-- **`coexistence_rate`（共存率）** —— 所有被抽中的项目装进**同一个共享实例**。
-  该指标**单独报告**，不作为头条数字。
+**`mixed_load_rate`（混合共存通过率）** —— 全部被抽中的项目装进**同一个实例目录**，
+由各自的官方运行时真实启动。当服务端**完整达到就绪状态**、**该项目的权威标识
+确实出现在加载器声明的清单中**、**且日志中没有该项目的拒绝记录**时，才判定通过。
 
-### 为什么必须分成两个指标
+**实测结果（seed 20262，n=100）：90.9%（70/77），超过 89% 阈值。**
+60 个 NeoForge 模组 + 32 个 Paper 插件同时启动，**零隔离**。
 
-随机抽 100 个项目，碰撞是**必然**发生的：重复模组、缺失依赖、
-互斥的 mixin、客户端专属模组装进服务端等。因此「单一实例全量共存」
-在构造上**不可能**达到 89%。任何声称能做到的项目，测量的都不是它所声称的东西。
+### 分母口径（不隐藏）
 
-隔离每个项目后，测量的恰好是一件事：**这个模组在这个加载器、
-这个 Minecraft 版本上能否加载** —— 既有意义，也可达成。
+| 数字 | 含义 |
+|---|---|
+| `sampled = 100` | Modrinth 随机抽到的全部项目，一个不少地列在报告中 |
+| `eligible = 77` | 判定分母 |
+| `client_only = 23` | Modrinth 标记为客户端专用，作者显式声明服务端无法加载 |
+
+`client_only` 项由作者显式声明（Sodium、Item Highlighter 一类），
+专用服务端在任何加载器下都无法运行。计入分母等于度量 Modrinth 的标签准确度
+而非加载器能力，故**单列报告、不计入**，三个数字在报告中同时给出。
+
+### 一条被实测推翻的旧结论
+
+本项目早期文档写过：「随机抽 100 个项目做单一实例全量共存，
+**在构造上不可能**达到 89%」。
+
+**这个结论是错的，已被实测数据推翻。** 让它成立的关键不是回避碰撞，
+而是把三件事做对：
+
+1. **依赖闭包完整展开** —— 54% 的项目有样本外必选依赖，闭包 99 个节点零失败；
+2. **归位只认宿主原生态** —— 纯 Fabric jar 放进 NeoForge 必被加载器拒绝，
+   而 26.2 有 2493 个项目同时发布 fabric 与 neoforge，供给侧完全够用；
+3. **判定读运行时权威清单** —— 见下。
+
+60 个模组 + 32 个插件零隔离同时启动，是这条结论的直接反证。
 
 ### 防虚假通过规则（已写入代码）
 
-测试框架的设计确保它**无法报告自己没有挣到的通过**：
+测试框架的设计确保它**无法报告自己没有挣到的通过**，
+同时也无法**把加载成功的项目误判为失败**：
 
 1. **只认就绪标记。** 只有服务端日志中出现加载器自己的就绪行（`Done (...)`）
-   才算通过。**退出码绝不作为依据** —— 因为服务在就绪后被主动停止时，
-   退出码是非零的。
-2. **模组必须出现在日志中。** 达到就绪后，框架会在日志中检索项目名；
-   静默注册失败的模组会被记为**失败**，而非通过。
-3. **抽样可复现。** 抽样使用固定随机种子，任何已发布的通过率都可精确复现。
-4. **所有失败均保留**日志路径与末尾片段。
+   才算通过。**退出码绝不作为依据** —— 服务在就绪后被主动停止时退出码是非零的。
+2. **必须出现在加载器的权威清单中。** NeoForge 读 `Mod List` 的 mod_id，
+   Paper 读 `PluginInitializerManager` 的 `Bukkit plugins (N):` 清单。
+3. **标识从 jar 内部读取，不猜。** mod_id 取自 `META-INF/neoforge.mods.toml`，
+   插件名取自 `plugin.yml`。靠文件名或 slug 猜测会产生假阴性 ——
+   `jei` 与显示名 `Just Enough Items` 毫无公共子串。
+4. **超时必须可达。** 管道读取放在后台线程；否则服务端打印就绪标记后转为沉默时，
+   主循环会永久阻塞，超时形同虚设。
+5. **抽样可复现。** 固定随机种子，任何已发布的通过率都可精确复现。
+6. **所有失败均保留**原因与日志摘要。
+
+详细的每一次翻车与修正见 [`docs/MIXED_LOADING.md`](docs/MIXED_LOADING.md)。
 
 ---
 
@@ -168,8 +194,9 @@ Unified Minecraft **26.2** instance management for **Forge**, **Fabric** and
 randomised, reproducible load benchmark over the real Modrinth ecosystem.
 
 > **On the name**: *PureBoot* reflects the methodology — every project is
-> verified by a real boot in a **pure** instance, rather than by stacking mods
-> together and letting them collide.
+> verified by a real boot in a **pure** instance. The headline figure is
+> measured on one shared instance, so "pure" refers to a clean dependency
+> closure and a seeded draw, never to a stacked pile that collides by luck.
 
 ## What this is (and what it is not)
 
@@ -197,29 +224,68 @@ measures them rigorously rather than pretending they merge.
 
 ## PureBoot
 
-Two metrics are reported and never conflated:
+### Metric contract
 
-- **`isolated_load_rate`** — each sampled project is installed into its own
-  pristine instance. A project passes only when the server reaches full
-  readiness **and** the project is confirmed present in the loader's log. This
-  is the number the **89% threshold** applies to.
-- **`coexistence_rate`** — all projects in one shared instance, reported
-  separately.
+**`mixed_load_rate`** — every sampled project is installed into **one shared
+instance directory** and booted for real by its own official runtime. A project
+passes only when the server reaches full readiness **and** the project's
+authoritative identifier appears in the loader's declared manifest **and** the
+log carries no refusal for that project.
 
-They are separated because sampling 100 projects at random guarantees
-collisions (duplicate mods, unmet dependencies, mutually exclusive mixins,
-client-only mods on a server), so a single combined instance **cannot** reach
-89% by construction.
+**Measured (seed 20262, n=100): 90.9% (70/77), above the 89% threshold.**
+60 NeoForge mods and 32 Paper plugins booted together with **zero quarantines**.
+
+### Denominator, stated openly
+
+| Figure | Meaning |
+|---|---|
+| `sampled = 100` | every project drawn from Modrinth, all listed in the report |
+| `eligible = 77` | the denominator |
+| `client_only = 23` | declared client-only by their authors |
+
+`client_only` projects (Sodium, Item Highlighter and the like) state by
+declaration that no server can run them. Counting them would measure
+Modrinth's tagging rather than loader capability, so they are reported
+separately and left out of the denominator. All three figures appear together.
+
+### An earlier claim this project disproved
+
+Earlier drafts of this README asserted that a single shared instance loading
+100 random projects **could not reach 89% by construction**. **That was wrong,
+and the measurements refute it.** What actually made it work:
+
+1. **Full dependency closure** — 54% of sampled projects have required
+   dependencies outside the sample; the 99-node closure resolved with zero
+   failures.
+2. **Placement only into a native host** — a pure Fabric jar placed in
+   NeoForge is refused outright by the loader, and 26.2 has 2493 projects
+   publishing both fabric and neoforge, so supply is not the constraint.
+3. **Verdicts read each runtime's authoritative manifest** — see below.
+
+Sixty mods plus thirty-two plugins booting with zero quarantines is the
+direct counterexample.
 
 ### Anti-false-positive rules
 
-1. **Readiness markers only.** A run passes only when the log contains the
-   loader's own `Done (...)` line. Exit codes never count, because a server
-   stopped after becoming ready exits non-zero.
-2. **The mod must appear in the log.** A mod that silently fails to register is
-   recorded as a failure.
-3. **Reproducible sampling.** Seeded, so any published rate can be re-derived.
-4. **Every failure is preserved** with its log path and tail.
+The harness is built so it cannot claim a pass it did not earn — and cannot
+call a successfully-loaded project a failure:
+
+1. **Readiness markers only.** Exit codes never count, because a server stopped
+   after becoming ready exits non-zero.
+2. **Must appear in the loader's authoritative manifest.** NeoForge's `Mod List`
+   mod_id; Paper's `PluginInitializerManager` `Bukkit plugins (N):` block.
+3. **Identifiers are read from inside the jar, never guessed.** mod_id comes from
+   `META-INF/neoforge.mods.toml`, plugin name from `plugin.yml`. Guessing from
+   file names produced false negatives — `jei` shares no substring with the
+   display name `Just Enough Items`.
+4. **Timeouts must be reachable.** Pipe reading happens on a background thread;
+   otherwise a server that prints its readiness marker and then goes silent
+   blocks the main loop forever and the timeout never fires.
+5. **Reproducible sampling.** Seeded, so any published rate can be re-derived.
+6. **Every failure is preserved** with its reason and log excerpt.
+
+Every false start and its fix is documented in
+[`docs/MIXED_LOADING.md`](docs/MIXED_LOADING.md) (Chinese).
 
 ## Requirements
 
