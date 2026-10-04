@@ -145,8 +145,11 @@ def run(n: int = 100, seed: int = SEED, mc: str = MC,
     # is reported, even ones that never make it onto a disk, so the report is a
     # faithful account of the draw.
     rows: list[Row] = []
-    for i, root in enumerate(roots):
-        pid, slug, title, ptype = root[0], root[1], root[2], root[3]
+    # Note the loop variable: `root` is already the instance path in this
+    # function, and shadowing it here made `inst_mod.build(root, mc)` receive a
+    # tuple instead of a Path.
+    for i, entry in enumerate(roots):
+        pid, slug, title, ptype = entry[0], entry[1], entry[2], entry[3]
         r = by_id.get(pid)
         if r is None:
             rows.append(Row(i, slug, title, ptype, "", "", "", "",
