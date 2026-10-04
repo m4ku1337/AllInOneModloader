@@ -134,22 +134,46 @@ def render(report_path: Path, out_path: Path | None = None) -> Path:
 
         def bucket(r: dict) -> str:
             ev = (r.get("evidence") or "") + " " + (r.get("reason") or "")
+            if "no build for a runtime" in ev:
+                return "架构限制：无可用生态构建"
+            if "carries no plugin.yml" in ev:
+                return "归位错误：jar 不是 Bukkit 插件"
+            if "absent from mod list" in ev:
+                return "未出现在加载器清单"
             if "cannot be loaded" in ev:
                 return "加载器拒绝该 jar"
-            if "absent from mod list" in ev:
-                return "未出现在模组列表"
             if "never reached readiness" in ev:
                 return "服务端未就绪"
-            if "no build for a runtime" in ev:
-                return "无可用生态构建"
             return "其他"
 
+        # A note per known bucket, so the grouping is not just a label.
+        notes = {
+            "架构限制：无可用生态构建":
+                "这些项目在 26.2 只发布 fabric（或 fabric + quilt），"
+                "既无 neoforge/forge 版也无 Bukkit 版。NeoForge 会显式拒绝纯 Fabric jar，"
+                "而 Sinytra Connector 尚不支持 26.2，因此它们**在本架构下无法进入实例**。"
+                "这是已知限制而非缺陷 —— 26.2 有 2493 个项目同时发布 fabric 与 neoforge，"
+                "多生态供给充足，纯 Fabric 独占只是少数。",
+            "归位错误：jar 不是 Bukkit 插件":
+                "项目页在 Modrinth 上标注了 paper 加载器，但下载到的 jar 内"
+                "**不含 `plugin.yml` / `paper-plugin.yml`**，因此不是 Bukkit 插件。"
+                "这是项目侧信息与产物不一致，不是 AllInOne 的兼容性问题；"
+                "框架已将其撤档并如实归因，而非让它冒充项目质量缺陷。",
+            "未出现在加载器清单":
+                "服务端正常就绪，但该 jar 未出现在 Paper 的初始化清单中。"
+                "典型原因是 Modrinth 上的文件本身是占位符 —— 例如 `vnc` 的 "
+                "`plugin.yml` 只有一行 `# Placeholder file to upload it into Modrinth`，"
+                "项目从未发布真正的插件文件。",
+        }
         for name, grp in sorted(
                 ((n, [r for r in fails if bucket(r) == n])
                  for n in {bucket(r) for r in fails}),
                 key=lambda kv: -len(kv[1])):
             A(f"### {name}（{len(grp)} 项）")
             A("")
+            if name in notes:
+                A(f"> {notes[name]}")
+                A("")
             for r in grp:
                 A(f"- **{r['slug']}**（{_type_label(r)}，"
                   f"宿主 {r['host'] or '未归位'}，构建 {r['chosen_loader'] or '—'}）")
