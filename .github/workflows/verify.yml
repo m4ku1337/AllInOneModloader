@@ -34,6 +34,12 @@ jobs:
           python-version: '3.12'
 
       - name: Verify loader boots 26.2
+        # forge/paper installers stall on this network. Keep their budgets well
+        # under the job timeout so a stall surfaces as a failed job with a log
+        # in minutes, not as a 25-minute hang that tells us nothing.
+        env:
+          AIOM_PROBE_TIMEOUT: '300'
+          AIOM_INSTALL_TIMEOUT: '600'
         run: python -m aiom.core.launcher ${{ matrix.loader }}
 
       - name: Upload boot log

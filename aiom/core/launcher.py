@@ -254,7 +254,11 @@ def prepare_neoforge(instance: Path, mc: str = mcmeta.TARGET_MC) -> tuple[list[s
     if not args.exists():
         args = instance / "libraries" / "net" / "neoforged" / "neoforge" / ver / "unix_args.txt"
     if not args.exists():
-        raise RuntimeError(f"NeoForge {ver} install incomplete")
+        raise RuntimeError(
+            f"NeoForge {ver} install incomplete: no args file under {args.parent}. "
+            f"The installer's own downloads are blocked on this network; "
+            f"check {instance / 'installer.log'} for the last coordinate it "
+            f"failed to fetch.")
     return ([f"@{instance.resolve() / 'user_jvm_args.txt'}", f"@{args.resolve()}", "nogui"],
             f"neoforge {ver}")
 
@@ -283,33 +287,80 @@ def _coords_to_urls(blob: str) -> set[str]:
     return urls
 
 
-def _run_installer(instance: Path, installer: Path, attempts: int = 3) -> str:
-    """Run an installer, prefetching the libraries it could not download.
+def _env_int(name: str, default: int) -> int:
+    """Read a positive integer from the environment, ignoring junk values."""
+    try:
+        v = int(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
+    return v if v > 0 else default
 
-    Returns the combined log blob. Retries because the first pass usually
-    fails on blocked network while populating installer.log; after a prefetch
-    the second pass has everything it needs locally.
+
+# Installer budgets, in seconds. The probe pass only needs long enough to make
+# the installer print its dependency coordinates before it starts downloading;
+# the real pass then runs almost entirely offline against what we prefetched.
+#
+# These were 1800x3 (a 90-minute worst case) with no way to shorten them, which
+# is fine on a developer machine but guarantees a CI timeout on any runner whose
+# network stalls the installer -- the job dies before the first attempt returns.
+PROBE_TIMEOUT = _env_int("AIOM_PROBE_TIMEOUT", 420)
+INSTALL_TIMEOUT = _env_int("AIOM_INSTALL_TIMEOUT", 1500)
+
+
+def _run_installer_once(instance: Path, jar: str, timeout: int) -> str:
+    """Run one installer pass, returning its combined output.
+
+    A timeout is treated as "the installer printed what it knew and then
+    stalled", not as an error: the partial blob still carries the coordinates
+    we need to prefetch, so the caller can retry offline.
     """
     java_home, _ = javart.resolve(mcmeta.java_major(mcmeta.TARGET_MC))
-    # cwd is the instance, so every path handed to the JVM must be absolute or
-    # the installer jar itself becomes unresolvable.
-    jar = str(installer.resolve())
-    blob = ""
-    for attempt in range(attempts):
+    try:
         proc = subprocess.run(
             [_java_cmd(java_home), "-jar", jar, "--installServer"],
             capture_output=True, text=True, cwd=str(instance.resolve()),
-            encoding="utf-8", errors="replace", timeout=1800,
+            encoding="utf-8", errors="replace", timeout=timeout,
         )
         blob = (proc.stdout or "") + (proc.stderr or "")
-        log = instance / "installer.log"
-        if log.exists():
-            blob += log.read_text(encoding="utf-8", errors="replace")
+    except subprocess.TimeoutExpired as exc:
+        blob = ((exc.stdout or b"").decode("utf-8", "replace") if isinstance(
+            exc.stdout, bytes) else (exc.stdout or ""))
+        blob += "\n[aiom] installer exceeded its %ds budget; treating as partial\n" % timeout
+    log = instance / "installer.log"
+    if log.exists():
+        blob += log.read_text(encoding="utf-8", errors="replace")
+    return blob
+
+
+def _run_installer(instance: Path, installer: Path, attempts: int = 2) -> str:
+    """Run an installer, prefetching the libraries it could not download.
+
+    Returns the combined log blob. Structure is probe -> prefetch -> install:
+
+    The installer prints one `group:artifact:version` per line before it starts
+    downloading. Its own HTTP client is unreliable behind restrictive proxies,
+    so the probe pass exists purely to harvest those coordinates (under a short
+    timeout, since it is expected to stall), and the install pass then runs
+    against jars we mirrored ourselves via curl.
+    """
+    # cwd is the instance, so every path handed to the JVM must be absolute or
+    # the installer jar itself becomes unresolvable.
+    jar = str(installer.resolve())
+
+    blob = _run_installer_once(instance, jar, PROBE_TIMEOUT)
+    urls = set(re.findall(r"https?://[^\s,\"]+\.jar", blob))
+    urls |= _coords_to_urls(blob)
+    fetched = _prefetch(instance, " ".join(urls))
+    if _installer_done(instance):
+        return blob
+
+    for _ in range(max(1, attempts - 1)):
+        blob = _run_installer_once(instance, jar, INSTALL_TIMEOUT)
         urls = set(re.findall(r"https?://[^\s,\"]+\.jar", blob))
         urls |= _coords_to_urls(blob)
-        _prefetch(instance, " ".join(urls))
+        fetched += _prefetch(instance, " ".join(urls))
         if _installer_done(instance):
-            return blob
+            break
     return blob
 
 
@@ -406,7 +457,11 @@ def prepare_forge(instance: Path, mc: str = mcmeta.TARGET_MC) -> tuple[list[str]
     if not args.exists():
         args = base / "unix_args.txt"
     if not args.exists():
-        raise RuntimeError(f"Forge {ver} install incomplete")
+        raise RuntimeError(
+            f"Forge {ver} install incomplete: no args file under {base}. "
+            f"The installer's own downloads are blocked on this network; "
+            f"check {instance / 'installer.log'} for the last coordinate it "
+            f"failed to fetch.")
     return ([f"@{instance.resolve() / 'user_jvm_args.txt'}", f"@{args.resolve()}", "nogui"],
             f"forge {ver}")
 
