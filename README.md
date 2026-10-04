@@ -49,6 +49,10 @@ Minecraft 26.2 得到了四大生态的完整支持，本项目对它们逐一�
 从 Modrinth 按 Minecraft 26.2 筛选并随机抽取 N 个项目，逐一真实安装，
 并如实报告结果。
 
+> **命名说明**：**PureBoot** 强调本基准的核心方法论 —— 每个项目都在**纯净
+> （pure）实例**中**真实启动（boot）**验证。它不靠把模组堆在一起取胜，
+> 而是靠排除干扰、逐个确认「这个模组在这个加载器上究竟能不能起来」。
+
 ### 指标契约（两个指标严格分离，绝不混淆）
 
 - **`isolated_load_rate`（隔离加载率）** —— 每个被抽中的项目都在**独立的纯净实例**中安装。
@@ -162,6 +166,10 @@ to defining the goal and answering clarifying questions.
 Unified Minecraft **26.2** instance management for **Forge**, **Fabric** and
 **NeoForge** mods plus **Paper** plugins, together with **PureBoot** — a
 randomised, reproducible load benchmark over the real Modrinth ecosystem.
+
+> **On the name**: *PureBoot* reflects the methodology — every project is
+> verified by a real boot in a **pure** instance, rather than by stacking mods
+> together and letting them collide.
 
 ## What this is (and what it is not)
 
