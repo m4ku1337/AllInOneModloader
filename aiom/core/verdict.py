@@ -16,6 +16,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import jarid
+
 # The server reached a usable state.
 READY = re.compile(r"Done \([\d.,]+s\)!|Server ready|Started @\s*"
                    r"|For help, type \"help\"", re.IGNORECASE)
@@ -58,13 +60,25 @@ def read_log(path: Path) -> str:
     return Path(path).read_text(encoding="utf-8", errors="replace")
 
 
-def _tokens(slug: str, filename: str) -> list[str]:
+def _tokens(slug: str, filename: str, jar_path: str = "") -> list[str]:
     """Searchable names for a project, most specific first.
 
-    The mod id is the loader's own handle and is the only token guaranteed to
-    appear in a mod table, so it is derived first from the jar stem.
+    The authoritative mod id comes first, read out of the jar's own
+    `META-INF/neoforge.mods.toml`. Deriving it from the file name instead is
+    what made JEI a false negative:
+
+        jar  028-jei-26.2-neoforge-30.39.0.232.jar
+        log  Just Enough Items 30.39.0.232 (jei)
+
+    The slug `jei` shares no substring with the display name, and it is only
+    three characters, so the length filter below would drop it anyway. The jar
+    itself always knows.
     """
     out: list[str] = []
+    if jar_path:
+        mid = jarid.mod_id(jar_path)
+        if mid:
+            out.append(mid)
     stem = re.sub(r"\.jar$", "", filename or "", flags=re.IGNORECASE)
     if stem:
         # Strip our own ordering prefix ("003-name.jar").
@@ -84,15 +98,18 @@ def _tokens(slug: str, filename: str) -> list[str]:
         if m2:
             out.append(m2.group(1))
     # Longest first: a bare short token like "core" would match far too much.
+    # The jar-declared id is exempt from the length filter -- it is a handle,
+    # not a guessed word, so even "jei" or "mru" is safe to match exactly.
     seen: dict[str, None] = {}
+    authoritative = jarid.mod_id(jar_path) if jar_path else None
     for t in sorted(out, key=len, reverse=True):
-        if len(t) >= 4:
+        if len(t) >= 4 or (authoritative and t == authoritative):
             seen.setdefault(t, None)
     return list(seen)
 
 
 def judge(log_text: str, slug: str, filename: str,
-          loader: str = "neoforge") -> Verdict:
+          loader: str = "neoforge", jar_path: str = "") -> Verdict:
     """PASS requires readiness AND presence AND no refusal for this project."""
     if not log_text:
         return Verdict(False, "log missing or empty")
@@ -101,11 +118,15 @@ def judge(log_text: str, slug: str, filename: str,
 
     # Scope refusal detection to lines mentioning this project, so an unrelated
     # mod's failure is not misattributed.
-    toks = _tokens(slug, filename)
+    toks = _tokens(slug, filename, jar_path)
     refusal_hits = []
     for line in log_text.splitlines():
         if REFUSED.search(line) and any(t.lower() in line.lower() for t in toks):
             refusal_hits.append(line.strip())
+
+    # The jar's own declared id, if we could read one. It is compared for exact
+    # equality against the mod table, which no prose can fake.
+    declared = jarid.mod_id(jar_path) if jar_path else None
 
     present = False
     evidence = ""
@@ -122,6 +143,10 @@ def judge(log_text: str, slug: str, filename: str,
         # The mod id is compared with the project tokens.
         for m in NEOFORGE_MODLIST.finditer(log_text):
             mod_id = m.group(2)
+            if declared and mod_id.lower() == declared.lower():
+                present = True
+                evidence = m.group(0).strip()
+                break
             if any(t.lower() == mod_id.lower() for t in toks):
                 present = True
                 evidence = m.group(0).strip()

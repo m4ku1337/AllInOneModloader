@@ -112,7 +112,8 @@ def _primary(v: dict) -> dict | None:
 
 
 def resolve(project_id: str, slug: str = "", title: str = "",
-            ptype: str = "mod", mc: str = MC) -> Resolved | None:
+            ptype: str = "mod", mc: str = MC,
+            ptypes: list[str] | None = None) -> Resolved | None:
     """Pick the best 26.2 build this project can contribute to the instance.
 
     A project may publish several builds for 26.2 (one per ecosystem). We walk
@@ -142,63 +143,90 @@ def resolve(project_id: str, slug: str = "", title: str = "",
     r.environment = next((v.get("environment", "unknown")
                           for v in by_loader.values()), "unknown")
 
-    # Each entry is (family, loaders-in-preference-order). The family is always
-    # the first loader in its own tuple, so it is read from there rather than
-    # destructured -- unpacking would fail on the longer fallback tuples.
-    for entry in HOST_PREFERENCE:
-        fam, loaders = entry[0], entry
-        for loader in loaders:
-            if loader not in by_loader:
-                continue
-            if FAMILY.get(loader) != fam:
-                continue
-            v = by_loader[loader]
-            f = v["file"]
-            r.host = HOST_OF[fam]
-            r.chosen_loader = loader
-            r.version_number = v.get("version_number", "")
-            r.filename = f.get("filename", "")
-            r.url = f.get("url", "")
-            r.sha1 = (f.get("hashes") or {}).get("sha1", "")
-            r.size = f.get("size", 0)
-            r.environment = v.get("environment", "unknown")
-            r.required = [d.get("project_id") or d.get("slug")
-                          for d in v.get("dependencies", [])
-                          if d.get("dependency_type") == "required"
-                          and (d.get("project_id") or d.get("slug"))]
-            return r
+    # Only a loader native to a runtime we actually host may be installed.
+    # `HOST_PREFERENCE` alone is not enough to decide this: it is an ordered
+    # list of families, so a project publishing *only* fabric fell through to
+    # the fabric entry and had its jar dropped into the NeoForge directory,
+    # where the loader rejects it outright:
+    #     "File mods/bclib-26.201.2.jar is a Fabric mod and cannot be loaded"
+    # Fabric is hosted by NeoForge only in the sense that a project publishing
+    # both ecosystems is taken from its NeoForge build -- never from the fabric
+    # one. A fabric-only project is genuinely unplaceable.
+    neoforge_builds = [l for l in ("neoforge", "forge") if l in by_loader]
+    paper_builds = [l for l in ("paper", "purpur", "spigot", "bukkit", "folia")
+                    if l in by_loader]
 
-    r.reason = (f"no build for a hosted ecosystem "
-                f"(loaders: {','.join(r.loaders) or 'none'})")
+    wants_plugin = "plugin" in (ptypes or [ptype])
+    if wants_plugin and paper_builds:
+        chosen_pool = paper_builds
+    elif neoforge_builds:
+        chosen_pool = neoforge_builds
+    elif paper_builds:
+        chosen_pool = paper_builds
+    else:
+        chosen_pool = []
+
+    for loader in chosen_pool:
+        if loader not in by_loader:
+            continue
+        v = by_loader[loader]
+        f = v["file"]
+        r.host = HOST_OF[FAMILY[loader]]
+        r.chosen_loader = loader
+        r.version_number = v.get("version_number", "")
+        r.filename = f.get("filename", "")
+        r.url = f.get("url", "")
+        r.sha1 = (f.get("hashes") or {}).get("sha1", "")
+        r.size = f.get("size", 0)
+        r.environment = v.get("environment", "unknown")
+        r.required = [d.get("project_id") or d.get("slug")
+                      for d in v.get("dependencies", [])
+                      if d.get("dependency_type") == "required"
+                      and (d.get("project_id") or d.get("slug"))]
+        return r
+
+    r.reason = (
+        "no build for a runtime we host: "
+        f"publishes only {','.join(r.families) or 'no known ecosystem'} "
+        f"(loaders: {','.join(r.loaders) or 'none'})"
+    )
     return r
 
 
-def closure(roots: list[tuple[str, str, str, str]], mc: str = MC,
+def closure(roots: list[tuple], mc: str = MC,
             max_nodes: int = 400) -> list[Resolved]:
     """Expand required dependencies until the set closes.
 
-    `roots` are (project_id, slug, title, type) tuples. Dependencies are
-    fetched breadth-first and deduplicated by project id, so a mod required by
-    five others is downloaded once.
+    `roots` are (project_id, slug, title, type) tuples, optionally extended
+    with a fifth element carrying the project's full Modrinth type set. That
+    fifth element matters: a project declared both `mod` and `plugin` must be
+    free to take its Bukkit build, and reading only the primary type hid that.
+
+    Dependencies are fetched breadth-first and deduplicated by project id, so a
+    mod required by five others is downloaded once.
     """
     seen: dict[str, Resolved] = {}
-    queue: list[tuple[str, str, str, str]] = list(roots)
+    queue: list[tuple] = list(roots)
+
+    def _resolve(a: tuple) -> Resolved | None:
+        types = a[4] if len(a) > 4 and a[4] else None
+        return resolve(a[0], a[1], a[2], a[3], mc, types)
+
     with ThreadPoolExecutor(max_workers=8) as pool:
         while queue and len(seen) < max_nodes:
             batch = queue[:64]
             queue = queue[64:]
-            found = list(pool.map(lambda a: resolve(a[0], a[1], a[2], a[3], mc),
-                                   batch))
+            found = list(pool.map(_resolve, batch))
             for r in found:
                 if r is None or r.project_id in seen:
                     continue
                 seen[r.project_id] = r
                 for dep in r.required:
                     if dep not in seen:
-                        queue.append((dep, dep, dep, "mod"))
+                        queue.append((dep, dep, dep, "mod", []))
 
     out = list(seen.values())
     # Dependencies first: a library must be on disk before the mod needing it.
-    out.sort(key=lambda r: (0 if r.slug in
-                            {s for _, s, _, _ in roots} else 1, r.slug))
+    sampled = {s for _, s, *_ in roots}
+    out.sort(key=lambda r: (0 if r.slug in sampled else 1, r.slug))
     return out

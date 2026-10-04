@@ -114,7 +114,8 @@ def sample_roots(mc: str, n: int, seed: int) -> list[tuple]:
                             n=n, seed=seed)
     out = []
     for c in cands:
-        out.append((c.project_id, c.slug, c.title, c.project_type))
+        types = c.project_types or [c.project_type]
+        out.append((c.project_id, c.slug, c.title, c.project_type, types))
     return out
 
 
@@ -144,7 +145,8 @@ def run(n: int = 100, seed: int = SEED, mc: str = MC,
     # is reported, even ones that never make it onto a disk, so the report is a
     # faithful account of the draw.
     rows: list[Row] = []
-    for i, (pid, slug, title, ptype) in enumerate(roots):
+    for i, root in enumerate(roots):
+        pid, slug, title, ptype = root[0], root[1], root[2], root[3]
         r = by_id.get(pid)
         if r is None:
             rows.append(Row(i, slug, title, ptype, "", "", "", "",
@@ -227,7 +229,11 @@ def run(n: int = 100, seed: int = SEED, mc: str = MC,
                 continue
             if row.outcome == "fail":
                 continue
-            v = verdict.judge(log, row.slug, row.file, rt)
+            # The jar on disk is the only reliable source of the mod id; the
+            # file name disagrees with it often enough to matter (jei).
+            jar_path = rt_dir / ("plugins" if rt == "paper" else "mods") / fname
+            v = verdict.judge(log, row.slug, row.file, rt,
+                              str(jar_path) if jar_path.exists() else "")
             row.outcome = "pass" if v.passed else "fail"
             row.reason = v.reason
             row.evidence = v.evidence
