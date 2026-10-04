@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -96,6 +97,14 @@ def boot(cmd: list[str], log: Path, timeout: int,
     Returns (output, exit_code). A server that reaches readiness is stopped on
     purpose, so a non-zero exit afterwards is expected and never a failure on
     its own; readiness is decided from the log text instead.
+
+    The reader is a background thread rather than `for line in proc.stdout`.
+    A blocking read on the pipe never returns once the server goes quiet, and
+    since the deadline is only checked *after* a line arrives, a server that
+    prints its readiness marker and then stops talking -- which is exactly what
+    Paper does -- hangs the run forever instead of timing out. The thread makes
+    the timeout reachable: the main loop always wakes, whether or not output
+    arrives.
     """
     log.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.Popen(
@@ -104,21 +113,35 @@ def boot(cmd: list[str], log: Path, timeout: int,
         errors="replace", bufsize=1,
     )
     chunks: list[str] = []
-    deadline = time.time() + timeout
-    ready = False
-    assert proc.stdout is not None
-    try:
+
+    def pump() -> None:
+        assert proc.stdout is not None
         for line in proc.stdout:
             chunks.append(line)
-            if stop_marker and stop_marker in line:
-                ready = True
-                # Give the server a moment to finish flushing, then stop it.
-                deadline = min(deadline, time.time() + 20)
-            if time.time() > deadline:
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
+
+    deadline = time.time() + timeout
+    stop_at: float | None = None
+    try:
+        while True:
+            if stop_marker and stop_at is None:
+                if any(stop_marker in ln for ln in chunks[-400:]):
+                    # Give the server a moment to finish flushing, then stop it.
+                    stop_at = time.time() + 20
+            now = time.time()
+            if stop_at is not None and now >= stop_at:
                 break
+            if now >= deadline:
+                break
+            if proc.poll() is not None and not reader.is_alive():
+                break
+            time.sleep(0.25)
     finally:
         if proc.poll() is None:
             _stop_tree(proc, cwd)
+        reader.join(timeout=5)
     out = "".join(chunks)
     log.write_text(out, encoding="utf-8")
     return out, proc.returncode
