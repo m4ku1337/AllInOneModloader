@@ -28,7 +28,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .core import mcmeta
+from .core import jarid, mcmeta
 from .core.http import fetch_file
 from .core.launcher import Outcome, launch, prepare_neoforge, prepare_paper
 
@@ -168,9 +168,17 @@ def install(mods: list, root: Path) -> dict:
 
     `mods` are aiom.core.placement.Resolved items. Filenames are prefixed with
     an index so two ecosystems publishing the same filename cannot collide.
+
+    Returns counts plus `landed`: project_id -> the file name actually written.
+    That mapping is not a convenience. Every jar on disk carries an `NNN-`
+    prefix, so the name a project published under no longer exists anywhere,
+    and any later step that needs to open the jar -- reading its mod id, for
+    instance -- has to ask here rather than guess. Guessing produced a verdict
+    layer that silently fell back to fuzzy matching because `exists()` was False.
     """
     root = root.resolve()
-    placed = {"neoforge": 0, "paper": 0, "failed": 0}
+    placed = {"neoforge": 0, "paper": 0, "failed": 0, "landed": {},
+              "misrouted": {}}
     for i, r in enumerate(mods):
         if not r.placeable:
             placed["failed"] += 1
@@ -182,7 +190,20 @@ def install(mods: list, root: Path) -> dict:
         dest = dest_dir / f"{i:03d}-{safe}"
         try:
             fetch_file(r.url, dest, timeout=300)
+            # A jar routed to Paper must carry a Bukkit plugin descriptor.
+            # `stringandsand-1.2.0.jar` does not, and Paper rejects it with
+            # "does not contain a paper-plugin.yml or plugin.yml!" -- which
+            # reads like the project's fault and is not. Pull it back out and
+            # record it, so the row can report the real reason.
+            if r.host == "paper" and not jarid.has_plugin_descriptor(dest):
+                dest.unlink(missing_ok=True)
+                placed["failed"] += 1
+                placed["misrouted"][r.project_id] = (
+                    "routed to Paper but the jar carries no plugin.yml / "
+                    "paper-plugin.yml, so it is not a Bukkit plugin")
+                continue
             placed[r.host] += 1
+            placed["landed"][r.project_id] = dest.name
         except Exception:
             placed["failed"] += 1
     return placed

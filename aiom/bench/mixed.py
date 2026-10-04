@@ -43,6 +43,8 @@ class Row:
     in_sample: bool = True
     size: int = 0
     environment: str = "unknown"
+    pid: str = ""          # Modrinth project id
+    on_disk: str = ""      # file name actually written by install()
 
 
 @dataclass
@@ -153,7 +155,7 @@ def run(n: int = 100, seed: int = SEED, mc: str = MC,
         r = by_id.get(pid)
         if r is None:
             rows.append(Row(i, slug, title, ptype, "", "", "", "",
-                            "fail", "could not resolve a 26.2 build"))
+                            "fail", "could not resolve a 26.2 build", pid=pid))
         elif r.environment == "client_only":
             # Author-declared: no server runtime can host this. Reported in
             # full, but excluded from the denominator -- counting it would
@@ -162,15 +164,15 @@ def run(n: int = 100, seed: int = SEED, mc: str = MC,
                             r.filename, "skipped",
                             "Modrinth marks this 26.2 build client_only; "
                             "no server loader can host it",
-                            counted=False, environment=r.environment))
+                            counted=False, environment=r.environment, pid=pid))
         elif not r.placeable:
             rows.append(Row(i, slug, title, ptype, r.version_number, "", "",
                             r.filename, "fail", r.reason or "not placeable",
-                            environment=r.environment))
+                            environment=r.environment, pid=pid))
         else:
             rows.append(Row(i, slug, title, ptype, r.version_number, r.host,
                             r.chosen_loader, r.filename, size=r.size,
-                            environment=r.environment))
+                            environment=r.environment, pid=pid))
     rep.sampled = len(rows)
     rep.client_only = sum(1 for r in rows if r.outcome == "skipped")
     rep.unplaceable = sum(1 for r in rows
@@ -191,9 +193,22 @@ def run(n: int = 100, seed: int = SEED, mc: str = MC,
 
     print("[4/6] 下载并安装到对应运行时 ...")
     placed = inst_mod.install(resolved, root)
-    rep.installed = placed
+    rep.installed = {k: v for k, v in placed.items()
+                     if k not in ("landed", "misrouted")}
+    # project_id -> file name actually on disk. install() adds an `NNN-` index,
+    # so the published name exists nowhere and every path built from row.file
+    # would miss, silently disabling the authoritative mod-id lookup.
+    landed: dict = placed["landed"]
+    misrouted: dict = placed["misrouted"]
     print(f"      neoforge={placed['neoforge']} "
           f"paper={placed['paper']} failed={placed['failed']}")
+
+    for row in rows:
+        if row.pid in misrouted:
+            row.outcome = "fail"
+            row.reason = misrouted[row.pid]
+            row.host = ""
+            row.chosen_loader = ""
 
     print("[5/6] 启动各运行时并判定 ...")
     for rt in ("neoforge", "paper"):
@@ -221,7 +236,8 @@ def run(n: int = 100, seed: int = SEED, mc: str = MC,
         for row in rows:
             if row.host != rt:
                 continue
-            fname = Path(row.file).name
+            fname = landed.get(row.pid) or Path(row.file).name
+            row.on_disk = fname
             # Only jars the loader named are failures. A jar dropped by the
             # binary split was never proven guilty, and at 90-jar scale one
             # unnamed crash would otherwise take half the sample down with it.

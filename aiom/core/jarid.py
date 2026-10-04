@@ -72,6 +72,50 @@ def mod_ids(jars: list[str | Path]) -> dict[str, str]:
     return out
 
 
+# Bukkit/Paper plugins name themselves in plugin.yml or paper-plugin.yml, and
+# that name is what Paper prints at startup. It is frequently unrelated to both
+# the Modrinth slug and the jar file name:
+#     jar  046-orebfuscator-bukkit-5.6.2.jar -> Paper prints "Orebfuscator"
+#     jar  050-pv-addon-groups-1.1.1.jar    -> Paper prints "pv-addon-groups"
+_PLUGIN_YML = ("plugin.yml", "paper-plugin.yml")
+_YML_NAME = re.compile(r"^\s*name\s*:\s*(\S+)\s*$", re.MULTILINE)
+
+
+def plugin_name(jar: str | Path) -> str | None:
+    """Return the plugin name declared in plugin.yml / paper-plugin.yml."""
+    try:
+        with zipfile.ZipFile(str(jar)) as zf:
+            for entry in _PLUGIN_YML:
+                for name in zf.namelist():
+                    if name.lower() != entry:
+                        continue
+                    if zf.getinfo(name).file_size > 128 * 1024:
+                        continue
+                    blob = zf.read(name).decode("utf-8", "replace")
+                    m = _YML_NAME.search(blob)
+                    if m:
+                        return m.group(1).strip("'\"")
+    except (OSError, zipfile.BadZipFile):
+        return None
+    return None
+
+
+def has_plugin_descriptor(jar: str | Path) -> bool:
+    """True when the jar actually carries a Bukkit plugin descriptor.
+
+    A jar without plugin.yml cannot be a plugin at all, no matter which loader
+    the project page lists. Placing one in plugins/ produces
+    "does not contain a paper-plugin.yml or plugin.yml!" -- a self-inflicted
+    failure that has nothing to do with the project's own quality.
+    """
+    try:
+        with zipfile.ZipFile(str(jar)) as zf:
+            lowered = {n.lower() for n in zf.namelist()}
+            return any(p in lowered for p in _PLUGIN_YML)
+    except (OSError, zipfile.BadZipFile):
+        return False
+
+
 if __name__ == "__main__":
     import sys
     for arg in sys.argv[1:]:

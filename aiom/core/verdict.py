@@ -41,8 +41,51 @@ REFUSED = re.compile(
 # The mod id in parentheses is the authoritative handle.
 NEOFORGE_MODLIST = re.compile(r"^\s*(.+?)\s+\(([A-Za-z0-9_.\-]+)\)\s*$",
                               re.MULTILINE)
+
+# Paper announces what it actually initialised, in two comma-separated lines
+# that follow a "Paper plugins (N):" / "Bukkit plugins (N):" header:
+#     [PluginInitializerManager] Initialized 31 plugins
+#     [PluginInitializerManager] Bukkit plugins (26):
+#      - AxGraves (1.32.1), BlueMap (5.28), Orebfuscator (5.6.2), ...
+#
+# This list, not the per-plugin "Loading server plugin X" lines, is the
+# authoritative record of what is live. The latter is emitted by only some of
+# the load paths, and a later `ModernPluginLoadingStrategy` retry prints
+# "Could not load 'plugins\046-orebfuscator...jar'" for plugins that are in fact
+# running -- reading that as a failure produced 13 false negatives.
+PAPER_INITIALISED = re.compile(r"Initialized\s+(\d+)\s+plugins", re.IGNORECASE)
+PAPER_LIST_HEADER = re.compile(
+    r"(?:Paper|Bukkit)\s+plugins\s*\((\d+)\)\s*:", re.IGNORECASE)
 PAPER_PLUGINLIST = re.compile(
     r"\[[^\]]*\]\s+Loading\s+server plugin\s+([A-Za-z0-9_]+)", re.IGNORECASE)
+
+
+def paper_plugins(log_text: str) -> set[str]:
+    """Plugin names Paper reports as initialised, lower-cased.
+
+    Returns an empty set when the announcement is absent, so the caller can
+    fall back to the per-plugin log lines rather than reporting a clean server
+    as empty.
+    """
+    names: set[str] = set()
+    lines = log_text.splitlines()
+    for i, line in enumerate(lines):
+        if not PAPER_LIST_HEADER.search(line):
+            continue
+        # The names sit on the following line, prefixed with " - ".
+        for follow in lines[i + 1:i + 2]:
+            body = follow.strip().lstrip("-").strip()
+            if not body or not body.endswith(","):
+                # Either the list wrapped or this is not the list line.
+                if not body:
+                    continue
+            for entry in body.split(","):
+                entry = entry.strip().lstrip("-").strip()
+                m = re.match(r"([A-Za-z0-9_.\-]+)", entry)
+                if m:
+                    names.add(m.group(1).lower())
+            break
+    return names
 
 
 @dataclass
@@ -131,13 +174,39 @@ def judge(log_text: str, slug: str, filename: str,
     present = False
     evidence = ""
     if loader == "paper":
-        for t in toks:
-            m = re.search(rf"Loading server plugin\s+{re.escape(t)}",
-                          log_text, re.IGNORECASE)
-            if m:
-                present = True
-                evidence = m.group(0)
+        # Prefer the initialised-plugins announcement; it is the only complete
+        # record. The per-plugin lines are a fallback for older logs.
+        names = paper_plugins(log_text)
+        hay = names or set()
+        alt = re.compile(r"Loading server plugin\s+([A-Za-z0-9_.\-]+)",
+                         re.IGNORECASE)
+        for m in alt.finditer(log_text):
+            hay.add(m.group(1).lower())
+        # A Bukkit plugin declares its own name in plugin.yml / paper-plugin.yml.
+        # That name is what Paper prints, and it often differs from both the
+        # project slug and the jar file name.
+        pname = jarid.plugin_name(jar_path) if jar_path else None
+        candidates = {t.lower() for t in toks}
+        if pname:
+            candidates.add(pname.lower())
+        # Plugin names are CamelCase while slugs are hyphenated, so compare with
+        # every separator removed: "LeashablePlayers" vs "leashable-players".
+        flat = {c.replace("-", "").replace("_", "") for c in candidates}
+        for cand in candidates:
+            for known in hay:
+                if known == cand or known.replace("_", "").lower() == \
+                        cand.replace("_", "").lower():
+                    present = True
+                    evidence = f"plugin listed by Paper: {known}"
+                    break
+            if present:
                 break
+        if not present:
+            for known in hay:
+                if known.replace("-", "").replace("_", "") in flat:
+                    present = True
+                    evidence = f"plugin listed by Paper: {known}"
+                    break
     else:
         # Match the mod table entries: "Display Name Version (mod_id)".
         # The mod id is compared with the project tokens.
