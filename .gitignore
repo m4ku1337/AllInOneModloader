@@ -1,0 +1,26 @@
+# Downloaded Minecraft jars, loader profiles, benchmark instances
+.aiom/
+*.jar
+!tools/**/*.jar
+
+# Generated benchmark reports
+reports/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets — never commit credentials
+.env
+*.pem
+*.key
+# Local agent memory — never commit (may contain environment-specific detail)
+.workbuddy/
