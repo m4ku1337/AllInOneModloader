@@ -136,10 +136,15 @@ Cloth Config v26.2 API 26.2.155 (cloth_config)
    加载器层面互斥。本项目不宣称单 JVM 混合，而是**统一目录 + 双运行时**。
 2. **纯生态模组无法跨宿主。** 纯 Fabric 模组（不发布 neoforge 版）
    在本方案中无法进入 NeoForge 实例，如实计入未通过。
-3. **世界数据共享为软链接。** 两运行时不会同时持有世界锁，
-   启动脚本保证互斥访问。
+3. **世界数据不再共享。** 早期设计让两个运行时软链同一个世界目录，
+   实测导致 `world_gen_settings.dat` 被两种格式交替重写而损坏
+   （详见第八节）。现改为各运行时独立世界目录。
 4. **Paper 插件的服务端语义与模组不同**（Bukkit API vs FML 事件系统），
-   二者在同世界内不共享对象引用，仅共享世界存储。
+   二者在同实例内共享配置文件与端口，但不共享对象引用。
+5. **客户端专用项目不在判定范围内。** Modrinth 标记 `client_only` 的项目
+   在设计上就无法在服务端运行，单列报告而不计入通过率分母（详见第六之二节）。
+6. **隔离法无法归因「谁引发了冲突」。** 被隔离的 jar 记为失败，
+   但日志通常只点名崩溃点，未必是真正的冲突发起方。
 
 ## 六、防假阳性规则（不可妥协）
 
@@ -151,6 +156,80 @@ PureBoot 判定 PASS 必须同时满足：
 
 条件 2、3 是本次实测新增的——证伪 2 证明缺了它们就会把
 「服务端起来了但模组全被跳过」误判为通过。
+
+## 六之二、抽样口径（两次翻车换来的）
+
+抽样器最初写错了两个地方，导致基准测的根本不是用户要求的样本集。
+
+### 翻车 1：facet 只搜 `project_type:"mod"`
+
+`sampler_pool()` 对每个 loader 只发一条带 `project_type:"mod"` 的查询。
+实测结果：`Counter({'mod': 100})` —— **插件 0 个**。
+
+修法：对每个 `loader × LOADABLE_TYPES` 单元分别查询并设配额。
+
+### 翻车 2：`project_type` 只是**主**类型
+
+修好 facet 后仍然 100% 是 mod。逐条核对后发现的真相：
+
+```
+facet project_type:plugin  total_hits=4814   ← facet 生效了
+但 hits 里的 project_type 字段全是 "mod"
+```
+
+Modrinth 允许一个项目同时声明多种类型，而 `project_type` 只返回**其中一种**：
+
+| 项目 | `project_type` | `all_project_types` | 实际是什么 |
+|---|---|---|---|
+| WorldEdit | mod | mod, plugin | Bukkit 插件 |
+| FancyNpcs | mod | mod, plugin | Paper 插件 |
+| Chunky | mod | mod, plugin | Bukkit 插件 |
+| Simple Voice Chat | mod | mod, plugin | Bukkit 插件 |
+
+`all_project_types` 才是完整集合。改读该字段后分布变为：
+
+```
+类型桶:  {'mod': 68, 'plugin': 32}
+主加载器: {'neoforge': 30, 'forge': 29, 'fabric': 21, 'paper': 20}
+```
+
+### 翻车 3：池子均衡了，取样仍会偏
+
+`sampler_pool()` 均衡后 `sample()` 仍是全池 `shuffle` 后取前 n，
+完全可能连续抽到同一生态。改为按 `(类型桶, 主加载器)` **分层 +
+最大余额法配额 + 兜底回填**，同 seed 结果完全可复现。
+
+### 附带修正：`environment` 才是服务端可用性判据
+
+版本对象上**没有** `client_side` / `server_side` 字段，
+旧代码读不到就退回默认值 `"required"`，于是每个项目都看似服务端可用。
+真实字段是 `environment`，实测 100 样本分布：
+
+| environment | 数量 |
+|---|---|
+| `server_only` | 20 |
+| `client_and_server` | 14 |
+| `client_only` | **24** |
+| `unknown` | 24 |
+| `client_or_server_prefers_both` | 6 |
+| `server_only_client_optional` | 5 |
+| `client_or_server` | 5 |
+| `client_only_server_optional` | 2 |
+
+### 为什么 `client_only` 不进分母
+
+`client_only` 是**作者显式声明**：这个项目在设计上就只在客户端运行
+（Item Highlighter、Sodium、EntityCulling、Zoomify、MoreChatHistory…）。
+专用服务端在任何加载器下都不可能加载它——这与 AllInOne 的混合加载能力无关。
+
+若把它们计入分母，通过率的上限就被压到 76%，
+测的其实是 Modrinth 的标签准确度，而不是加载器。
+
+因此：**单列报告、不安装、不进分母**。报告中 `sampled`（抽样总数）、
+`eligible`（判定分母）、`client_only`（跳过数）三个数字同时给出，
+口径可被读者复核。依赖节点同样过滤——一个客户端库会把它依赖的模组一起拖垮。
+
+实测结果：闭包 126 节点 → 剔除 25 个 `client_only` → 余 **101 个全部可归位**。
 
 ## 七、共享实例的坏模组隔离（实测发现）
 
@@ -273,3 +352,90 @@ instance/
 `java.exe` 的 ProcessId 与 CommandLine，再按本工作区路径过滤。
 
 只杀命令行含本工作区路径的 JVM，避免误杀用户其他 Java 程序。
+
+## 十、超时形同虚设：阻塞读取导致永久挂起
+
+### 现象
+
+100 样本首轮运行中，NeoForge 阶段顺利通过
+（**87 个模组同时启动，`Done (4.277s)!`，零隔离**），
+Paper 也在 `06:22:32` 打出 `Done (38.036s)!` —— 但基准任务**永不返回**，
+一个 java 进程持续占用 1.5 GB 内存。
+
+### 根因
+
+`boot()` 用 `for line in proc.stdout` 阻塞读管道，而 deadline 检查
+**只放在读到新行之后**：
+
+```python
+for line in proc.stdout:          # ← 阻塞在这里
+    chunks.append(line)
+    if stop_marker and stop_marker in line:
+        deadline = min(deadline, time.time() + 20)
+    if time.time() > deadline:     # ← 永远走不到
+        break
+```
+
+Paper 打印就绪标记后**就不再输出任何一行**，于是 `proc.stdout` 永不返回，
+`break` 永远不执行，420 秒超时形同虚设。
+
+这不是「超时设得太短」，而是**超时不可达**。
+
+### 修正
+
+改为后台线程读管道，主循环定时轮询：
+
+```python
+reader = threading.Thread(target=pump, daemon=True)
+reader.start()
+while True:
+    if stop_marker and stop_at is None and any(...):
+        stop_at = time.time() + 20
+    if stop_at is not None and time.time() >= stop_at: break
+    if time.time() >= deadline: break
+    if proc.poll() is not None and not reader.is_alive(): break
+    time.sleep(0.25)
+```
+
+主循环无论如何都会醒来，因此超时终于可达。
+
+### 复现测试
+
+```python
+# 子进程打印就绪标记后 sleep(600) 不再输出
+prog = 'import sys,time; print("Done (38.0s)! For help"); sys.stdout.flush(); time.sleep(600)'
+```
+
+| 版本 | 结果 |
+|---|---|
+| 修复前 | 永久挂起 |
+| 修复后 | **21.2 秒返回**，标记完整捕获 |
+
+**教训**：带超时的循环里，任何阻塞调用都会吃掉这个超时。
+管道读取必须放到线程里，让控制流始终掌握在主循环手里。
+
+## 十一、二分移除不等于失败（规模放大后的缺陷）
+
+### 现象
+
+小样本（n=6）下二分几乎不触发，这个缺陷一直没暴露。
+到 90 个 jar 的规模，一次**无人点名**的崩溃会让二分移除后一半共 45 个，
+而判定逻辑把所有被移除的 jar 都记为失败——**一次崩溃就能把通过率打到 50% 上下**，
+且这 45 个模组从未被证明有任何问题。
+
+### 修正
+
+区分两种移除原因：
+
+| 类型 | 触发条件 | 判定 |
+|---|---|---|
+| `guilty` | 日志点名（`from mod X` / `X.mixins.json`） | **真失败** |
+| `unverified` | 无人点名，缩小搜索空间 | **不算失败** |
+
+启动成功后把 `unverified` 的 jar 全部放回磁盘，并**再启动一次**——
+因为刚才那份成功日志是在它们缺席时产生的，不能拿来给它们判定。
+若回填后再次崩溃，则保留缩减后的集合。
+
+单元测试：90 jar 二分 → `guilty 0` / `unverified 45`；
+回填后磁盘恢复 90 个且 `removed` 清空；点名移除 → `guilty` 命中。
+
