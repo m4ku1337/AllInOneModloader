@@ -13,6 +13,10 @@ jobs:
   loaders:
     name: ${{ matrix.loader }} 26.2
     runs-on: ubuntu-latest
+    # Without this, a loader whose installer stalls on a blocked download keeps
+    # the job alive for the full 6-hour default and every merge waits on it.
+    # The loader step itself gives up after 210s; this is the outer backstop.
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +49,7 @@ jobs:
   bench-smoke:
     name: bench smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
