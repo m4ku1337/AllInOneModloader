@@ -119,5 +119,43 @@ class FabricProfileTests(unittest.TestCase):
         server_jar.assert_not_called()
 
 
+class ArgsFileSelectionTests(unittest.TestCase):
+    """The installer writes both args files everywhere; pick by platform.
+
+    Preferring win_args.txt made every Linux run boot the Windows command line
+    and fail with "Could not find or load main class", which reads like a
+    broken loader but is our own selection bug.
+    """
+
+    def test_unix_preferred_when_both_exist(self):
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "win_args.txt").write_text("--windows", encoding="utf-8")
+        (tmp / "unix_args.txt").write_text("--unix", encoding="utf-8")
+        with mock.patch.object(launcher.os, "name", "posix"):
+            picked = launcher._pick_args(tmp, "Forge", "1", tmp)
+        self.assertEqual(picked.name, "unix_args.txt")
+
+    def test_windows_preferred_on_nt(self):
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "win_args.txt").write_text("--windows", encoding="utf-8")
+        (tmp / "unix_args.txt").write_text("--unix", encoding="utf-8")
+        with mock.patch.object(launcher.os, "name", "nt"):
+            picked = launcher._pick_args(tmp, "Forge", "1", tmp)
+        self.assertEqual(picked.name, "win_args.txt")
+
+    def test_falls_back_when_only_one_exists(self):
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "unix_args.txt").write_text("--unix", encoding="utf-8")
+        with mock.patch.object(launcher.os, "name", "nt"):
+            picked = launcher._pick_args(tmp, "Forge", "1", tmp)
+        self.assertEqual(picked.name, "unix_args.txt")
+
+    def test_missing_both_names_the_directory(self):
+        tmp = Path(tempfile.mkdtemp())
+        with self.assertRaises(RuntimeError) as ctx:
+            launcher._pick_args(tmp, "NeoForge", "26.2.0.88", tmp)
+        self.assertIn(str(tmp), str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

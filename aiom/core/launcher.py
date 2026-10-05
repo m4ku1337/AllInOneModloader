@@ -265,6 +265,27 @@ def _ensure_server_jar(instance: Path, mc: str = mcmeta.TARGET_MC) -> None:
     _say(f"fabric: server.jar ready ({dest.stat().st_size // 1024} KiB)")
 
 
+def _pick_args(base: Path, loader: str, ver: str, instance: Path) -> Path:
+    """Choose the launcher's args file for the platform we are running on.
+
+    The installer writes *both* `win_args.txt` and `unix_args.txt` on every
+    platform, so preferring win first made every Linux CI run boot the Windows
+    command line and die with "Could not find or load main class" -- reported as
+    a loader failure when the loader was in fact fine. Pick by platform.
+    """
+    order = (["unix_args.txt", "win_args.txt"] if os.name != "nt"
+             else ["win_args.txt", "unix_args.txt"])
+    for name in order:
+        candidate = base / name
+        if candidate.exists():
+            return candidate
+    raise RuntimeError(
+        f"{loader} {ver} install incomplete: neither unix_args.txt nor "
+        f"win_args.txt exists under {base}. The installer's own downloads are "
+        f"likely blocked on this network; check {instance / 'installer.log'} "
+        f"for the last coordinate it failed to fetch.")
+
+
 def prepare_neoforge(instance: Path, mc: str = mcmeta.TARGET_MC) -> tuple[list[str], str]:
     """Install NeoForge. Sandbox-safe: libraries are pre-fetched with curl
     because the NeoForge installer's own HTTP client is frequently blocked."""
@@ -284,15 +305,8 @@ def prepare_neoforge(instance: Path, mc: str = mcmeta.TARGET_MC) -> tuple[list[s
     java_home, _ = javart.resolve(mcmeta.java_major(mc))
     _run_installer(instance, installer)
 
-    args = instance / "libraries" / "net" / "neoforged" / "neoforge" / ver / "win_args.txt"
-    if not args.exists():
-        args = instance / "libraries" / "net" / "neoforged" / "neoforge" / ver / "unix_args.txt"
-    if not args.exists():
-        raise RuntimeError(
-            f"NeoForge {ver} install incomplete: no args file under {args.parent}. "
-            f"The installer's own downloads are blocked on this network; "
-            f"check {instance / 'installer.log'} for the last coordinate it "
-            f"failed to fetch.")
+    args = _pick_args(instance / "libraries" / "net" / "neoforged" / "neoforge" / ver,
+                  "NeoForge", ver, instance)
     return ([f"@{instance.resolve() / 'user_jvm_args.txt'}", f"@{args.resolve()}", "nogui"],
             f"neoforge {ver}")
 
@@ -563,15 +577,7 @@ def prepare_forge(instance: Path, mc: str = mcmeta.TARGET_MC) -> tuple[list[str]
     _run_installer(instance, installer)
 
     base = instance / "libraries" / "net" / "minecraftforge" / "forge" / ver
-    args = base / "win_args.txt"
-    if not args.exists():
-        args = base / "unix_args.txt"
-    if not args.exists():
-        raise RuntimeError(
-            f"Forge {ver} install incomplete: no args file under {base}. "
-            f"The installer's own downloads are blocked on this network; "
-            f"check {instance / 'installer.log'} for the last coordinate it "
-            f"failed to fetch.")
+    args = _pick_args(base, "Forge", ver, instance)
     return ([f"@{instance.resolve() / 'user_jvm_args.txt'}", f"@{args.resolve()}", "nogui"],
             f"forge {ver}")
 
