@@ -515,3 +515,85 @@ python tools/report.py reports/mixed-26.2-20262.json reports/REPORT-26.2.md
 ```
 
 同 seed 必得同结果：连续两轮均为 `90.9% / 70 passed / 7 failed`。
+
+## 十三、CI 上暴露的六个 bug（本地全绿，GitHub runner 上全红）
+
+第四节的通过率是本地 Windows 上测出来的。把同一套验证搬上 GitHub Actions
+后，四个加载器 job 全线变红，且**失败形态极具误导性**：日志里明明写着
+`Done (23.257s)!`，报告却是失败。逐个拆解如下，每一条都是本地环境
+永远暴露不出来的那类问题。
+
+### 1. `IncompleteRead` 穿透了兜底分支
+
+`urlopen(timeout=)` 的 timeout 是**socket 级**的，不是整次传输的预算。
+一个 63 MB 的 Paper jar 卡住再中途断开，实测在 300 秒预算下跑了
+**653 秒**才抛错。更糟的是 `IncompleteRead` 继承自
+`http.client.HTTPException`，既不是 `OSError` 也不是 `URLError`，
+直接穿过了本该触发 curl 兜底的 `except` 分支——兜底从未生效，运行直接死。
+
+改为 **curl 优先**：`--max-time` 约束整次传输，`subprocess.run(timeout=)`
+约束进程本身。urllib 保留为 curl 缺失或被拒时的回退。
+
+### 2. `killpg` 把负责记录的启动器自己杀了
+
+子进程默认继承父进程的进程组，于是 `os.killpg(child_pgid)` 会把信号
+同时发给**我们自己**。在 Linux 上停止一个正在正常启动的服务端，会顺手
+杀掉负责写判定结论的启动器。
+
+症状极静：`phases.log` 精确停在 `booting` 那一行，之后一行都没有——
+连本该写的 `pass after` 结果行都不存在，而 job 步骤本身 55 秒**正常结束**
+（不是超时）。服务端其实早已就绪。
+
+修复：`Popen(..., start_new_session=(os.name != "nt"))`。
+
+### 3. 就绪标记从 400 行窗口里滑走了
+
+`boot()` 只在轮询循环里扫 `chunks[-400:]`，而 Paper 启动会打出数千行，
+`Done (` 早已滑出窗口。看起来像扫描最近输出，实际是"扫描最后 400 行"。
+改为在读取线程里用 `Event` 一次性锁存，与日志长度无关。
+
+### 4. Paper 与 Forge 不把就绪信息打到 stdout
+
+Paper 经 paperclip 转发、Forge 经 ModLauncher 重定向，两者**只写**
+实例目录下的 `logs/latest.log`，管道里几乎空的。两个健康加载器因此被判失败。
+
+新增 `_LogTail` 增量读取 `logs/latest.log` 与 `debug.log`，按偏移量只读
+新增部分（轮询成本与日志长度无关），并处理轮转/截断时的偏移重置。
+
+### 5. Linux 上启动了 Windows 命令行
+
+安装器在所有平台都写出 `win_args.txt` **和** `unix_args.txt`，而我们
+无条件优先前者。于是每个 Linux run 都用 Windows 命令行启动，报
+`Could not find or load main class`——看起来像加载器坏了，实际是自己的
+选择逻辑错了。改为按 `os.name` 决定顺序。
+
+### 6. Fabric 缺 `server.jar`，而安装失败被静默吞掉
+
+Fabric 的安装器在网络不稳时不下载官方 server jar，且 `subprocess.run`
+没有检查返回码，失败无声无息，最终启动时报
+`Missing game jar at .../server.jar`。新增 `_ensure_server_jar` 显式补齐，
+并让安装失败时把输出带进异常信息。
+
+### 附带修掉的四类无界等待
+
+上述 bug 之所以难查，是因为**等待没有上界，日志又被丢弃**：
+
+| 位置 | 原状 | 现状 |
+|---|---|---|
+| 安装器 JVM | 1800 秒 × 3 次 = 最坏 90 分钟，不可调 | 探测/安装两段式，可经环境变量调低 |
+| 依赖预取 | 串行、每个 URL 120 秒，几百个即数小时 | 8 路并发 + 整体预算 |
+| curl 回退 | 继承一整轮 timeout（双倍） | 首选传输，只继承剩余预算 |
+| `java -version` 探测 | 每个候选 60 秒 | 20 秒，且失败不污染缓存 |
+
+配套的三项工程手段：
+
+- **阶段日志**（`[aiom] ...` 写入 `logs/phases.log` 并以 `if: always()` 上传）——
+  job 被超时杀掉时 GitHub 会丢弃控制台日志，artifact 是唯一证据
+- **外层 `timeout`**——各阶段预算约束的是单次等待，没有约束总和
+- **35 项单元测试**接入 CI，覆盖就绪判定、预算、进程隔离、平台选择
+
+最终六个 job 全绿：fabric 47s / forge 56s / neoforge 11s / paper 57s /
+unit tests 69s / bench smoke 12s。
+
+**教训**：这六条里有四条的失败形态都是"看起来像加载器坏了"。本地全绿
+不等于正确，尤其当验证代码本身依赖平台特性、日志通道和文件布局时。
