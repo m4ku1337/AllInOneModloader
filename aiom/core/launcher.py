@@ -618,13 +618,24 @@ def _prefetch(instance: Path, url_blob: str, budget: int | None = None) -> int:
         if left <= 0:
             return False
         dest.parent.mkdir(parents=True, exist_ok=True)
-        r = subprocess.run(
-            ["curl", "-sSL", "--fail", "--max-time", str(min(per_url, left)),
-             "-o", str(dest), url], capture_output=True)
-        if r.returncode != 0:
+        # Retry a few times. A single reset was enough to make the installer
+        # declare a jar permanently unfetchable: the prefetch gave up, the
+        # installer's own client got blocked the same way, and the install
+        # failed on a coordinate curl fetches fine on the next attempt. The
+        # same URL returned 200, 200, 200 seconds after one reset.
+        attempts = max(1, _env_int("AIOM_PREFETCH_ATTEMPTS", 3))
+        for _ in range(attempts):
+            left = int(deadline - time.time())
+            if left <= 0:
+                break
+            r = subprocess.run(
+                ["curl", "-sSL", "--fail", "--max-time",
+                 str(min(per_url, left)), "-o", str(dest), url],
+                capture_output=True)
+            if r.returncode == 0:
+                return True
             dest.unlink(missing_ok=True)
-            return False
-        return True
+        return False
 
     pool = ThreadPoolExecutor(max_workers=8)
     try:
