@@ -116,10 +116,19 @@ def boot(cmd: list[str], log: Path, timeout: int,
     )
     chunks: list[str] = []
 
+    # Latching the marker as it streams past. Re-scanning a sliding window of
+    # the last N lines looks equivalent but is not: Paper emits thousands of
+    # lines before `Done (`, so by the time the poll loop notices, the marker
+    # has scrolled out of any fixed window and the boot is scored a failure
+    # despite the server having started cleanly.
+    seen_marker = threading.Event()
+
     def pump() -> None:
         assert proc.stdout is not None
         for line in proc.stdout:
             chunks.append(line)
+            if stop_marker and stop_marker in line:
+                seen_marker.set()
 
     reader = threading.Thread(target=pump, daemon=True)
     reader.start()
@@ -128,10 +137,9 @@ def boot(cmd: list[str], log: Path, timeout: int,
     stop_at: float | None = None
     try:
         while True:
-            if stop_marker and stop_at is None:
-                if any(stop_marker in ln for ln in chunks[-400:]):
-                    # Give the server a moment to finish flushing, then stop it.
-                    stop_at = time.time() + 20
+            if stop_marker and stop_at is None and seen_marker.is_set():
+                # Give the server a moment to finish flushing, then stop it.
+                stop_at = time.time() + 20
             now = time.time()
             if stop_at is not None and now >= stop_at:
                 break
@@ -220,17 +228,41 @@ def prepare_fabric(instance: Path, mc: str = mcmeta.TARGET_MC) -> tuple[list[str
     (instance / "eula.txt").write_text("eula=true\n", encoding="utf-8")
     installer = fetch_file(FABRIC_INSTALLER, CACHE / "fabric-installer-1.1.2.jar")
     java_home, _ = javart.resolve(mcmeta.java_major(mc))
-    subprocess.run(
+    budget = _env_int("AIOM_FABRIC_INSTALL_TIMEOUT", 900)
+    _say(f"fabric: running installer (budget {budget}s)")
+    proc = subprocess.run(
         [_java_cmd(java_home), "-jar", str(installer), "server",
          "-mcversion", mc, "-loader", fabric.latest_loader(),
          "-dir", str(instance.resolve())],
         capture_output=True, text=True, cwd=str(instance.resolve()),
-        encoding="utf-8", errors="replace", timeout=900,
+        encoding="utf-8", errors="replace", timeout=budget,
     )
     launcher = instance / "fabric-server-launch.jar"
     if not launcher.exists():
-        raise RuntimeError("fabric installer produced no launcher jar")
+        blob = (proc.stdout or "") + (proc.stderr or "")
+        tail = "\n".join(blob.splitlines()[-12:])
+        raise RuntimeError(
+            f"fabric installer produced no launcher jar (exit {proc.returncode})"
+            + (f"; last output:\n{tail}" if tail else ""))
+    _ensure_server_jar(instance, mc)
     return ["-jar", str(launcher.resolve()), "nogui"], f"fabric {fabric.latest_loader()}"
+
+
+def _ensure_server_jar(instance: Path, mc: str = mcmeta.TARGET_MC) -> None:
+    """Fetch the vanilla server jar when the loader did not.
+
+    Fabric's server launcher refuses to start without `server.jar` sitting in
+    the instance directory ("Missing game jar at ..."), and its installer only
+    downloads that jar opportunistically -- on a runner whose network stalls
+    the installer it silently does not, leaving a profile that cannot launch.
+    Downloading it here makes the failure impossible rather than merely likely.
+    """
+    dest = instance / "server.jar"
+    if dest.exists() and dest.stat().st_size > 1024:
+        return
+    _say(f"fabric: fetching vanilla server jar for {mc}")
+    mcmeta.server_jar(mc, dest)
+    _say(f"fabric: server.jar ready ({dest.stat().st_size // 1024} KiB)")
 
 
 def prepare_neoforge(instance: Path, mc: str = mcmeta.TARGET_MC) -> tuple[list[str], str]:
