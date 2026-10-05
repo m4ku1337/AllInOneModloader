@@ -31,7 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     # Without this, a loader whose installer stalls on a blocked download keeps
     # the job alive for the full 6-hour default and every merge waits on it.
-    # The loader step itself gives up after 210s; this is the outer backstop.
+    # The budgets below sum to well under this, so a stall now surfaces as a
+    # failed job with a readable log instead of a silent hour-long hang.
     timeout-minutes: 25
     strategy:
       fail-fast: false

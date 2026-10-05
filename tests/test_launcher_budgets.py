@@ -168,6 +168,21 @@ class HttpFallbackBudgetTests(unittest.TestCase):
             self.assertEqual(http.fetch_bytes("https://x/y"), b"payload")
         run.assert_not_called()
 
+    def test_curl_process_has_a_python_side_timeout(self):
+        # curl's --max-time bounds the transfer but not a hung spawn or a stuck
+        # DNS lookup; without this the caller waits forever.
+        with mock.patch.object(http, "_has_curl", return_value=True), \
+                mock.patch.object(http.urllib.request, "urlopen",
+                                  side_effect=http.urllib.error.URLError("x")), \
+                mock.patch.object(http.subprocess, "run",
+                                  return_value=subprocess.CompletedProcess(
+                                      [], 0, b"ok", b"")) as run, \
+                mock.patch.object(http.time, "monotonic",
+                                  side_effect=[0.0, 0.0]):
+            http.fetch_bytes("https://x/y", timeout=60)
+        self.assertIsNotNone(run.call_args.kwargs.get("timeout"),
+                             "subprocess.run must carry its own timeout")
+
 
 if __name__ == "__main__":
     unittest.main()

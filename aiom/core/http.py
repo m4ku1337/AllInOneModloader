@@ -45,10 +45,15 @@ def fetch_bytes(url: str, timeout: int = TIMEOUT) -> bytes:
             # Pretending we succeeded would be worse than failing: callers
             # treat bytes as a valid payload, so re-raise the real error.
             raise
+        left = int(left)
+        # curl's own --max-time bounds the transfer, but not the cases where the
+        # process itself never gets that far (DNS stuck in the resolver, a hung
+        # spawn). Without the Python-side timeout the caller waits forever --
+        # which is how a 300s download budget turned into a 25-minute job.
         proc = subprocess.run(
-            ["curl", "-sSL", "--fail", "--max-time", str(int(left)),
+            ["curl", "-sSL", "--fail", "--max-time", str(left),
              "-A", UA, url],
-            capture_output=True, check=True,
+            capture_output=True, check=True, timeout=left + 15,
         )
         return proc.stdout
 
