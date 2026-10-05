@@ -142,21 +142,41 @@ python -m aiom.bench.pureboot -n 2 --loaders neoforge --out reports/smoke.json
 python tools/report.py reports/mixed.json reports/REPORT.md
 ```
 
-完整基准报告输出至 `--out` 指定的路径。实测结果见
-[`reports/REPORT-26.2.md`](reports/REPORT-26.2.md) 与
-[`docs/MIXED_LOADING.md`](docs/MIXED_LOADING.md)。
+> 上面第一条命令需要**完整的 100 样本基准**（约 5 分钟，会真实拉起服务端）。
+> 想先确认工具链可用，跑第二条冒烟版即可，数十秒出结果。
+
+实测结果已随仓库提交：
+
+| 文件 | 内容 |
+|---|---|
+| [`reports/REPORT-26.2.md`](reports/REPORT-26.2.md) | 90.9% 通过率的完整报告，含 100 个样本逐条明细与未通过归因 |
+| [`reports/mixed-26.2-20262.json`](reports/mixed-26.2-20262.json) | 上述报告的原始数据，可自行重新统计 |
+| [`docs/MIXED_LOADING.md`](docs/MIXED_LOADING.md) | 选型理由、实测翻车记录与每一个 bug 的根因 |
+
+用同一随机种子重跑，可以精确复现这份结果：
+
+```bash
+python -m aiom.bench.mixed -n 100 --seed 20262 --out reports/mixed.json
+```
 
 ## 五、项目结构
 
 ```
-aiom/core/http.py       带curl 回退的 HTTP 传输层
+aiom/core/http.py       传输层，curl 优先、urllib 兜底
 aiom/core/mcmeta.py     Mojang 版本清单、依赖库、jar 下载
 aiom/core/javart.py     Java 运行时发现
 aiom/core/fabric.py     Fabric loader / intermediary 版本解析
 aiom/core/paper.py      Paper v3 fill API
 aiom/core/modrinth.py   Modrinth 搜索、抽样、下载
-aiom/core/launcher.py   四套加载器的安装 + 启动 + 结果分级
-aiom/bench/pureboot.py  基准测试主体
+aiom/core/jarid.py      从 jar 内部读权威标识（mods.toml / plugin.yml）
+aiom/core/placement.py  归位：把项目放进能真正加载它的宿主
+aiom/core/verdict.py    三条件判定（就绪 + 在册 + 无拒绝）
+aiom/core/isolate.py    二分隔离，定位冲突模组
+aiom/core/launcher.py   四套加载器的安装 + 启动 + 阶段日志
+aiom/bench/mixed.py     完整混合基准（100 样本，真实拉起服务端）
+aiom/bench/pureboot.py  冒烟版基准
+tools/report.py         JSON → Markdown 报告
+tools/eco_analysis.py   各生态规模统计
 ```
 
 ## 六、环境坑位说明（代码中已处理）
@@ -319,20 +339,38 @@ python -m aiom.bench.pureboot -n 2 --loaders neoforge --out reports/smoke.json
 python tools/report.py reports/mixed.json reports/REPORT.md
 ```
 
-Measured results: [`reports/REPORT-26.2.md`](reports/REPORT-26.2.md) and
-[`docs/MIXED_LOADING.md`](docs/MIXED_LOADING.md).
+Measured results ship with the repo:
+
+| File | Contents |
+|---|---|
+| [`reports/REPORT-26.2.md`](reports/REPORT-26.2.md) | the 90.9% run in full — all 100 samples item by item, plus failure attribution |
+| [`reports/mixed-26.2-20262.json`](reports/mixed-26.2-20262.json) | the raw data behind that report, so the numbers can be re-derived |
+| [`docs/MIXED_LOADING.md`](docs/MIXED_LOADING.md) | design rationale, every false start, and the root cause of each bug (Chinese) |
+
+Re-running with the same seed reproduces it exactly:
+
+```bash
+python -m aiom.bench.mixed -n 100 --seed 20262 --out reports/mixed.json
+```
 
 ## Project layout
 
 ```
-aiom/core/http.py       transport with curl fallback
+aiom/core/http.py       transport, curl-first with urllib fallback
 aiom/core/mcmeta.py     Mojang manifest, libraries, jars
 aiom/core/javart.py     Java runtime discovery
 aiom/core/fabric.py     Fabric loader/intermediary resolution
 aiom/core/paper.py      Paper v3 fill API
 aiom/core/modrinth.py   Modrinth search, sampling, download
-aiom/core/launcher.py   install + boot + classify for all four loaders
-aiom/bench/pureboot.py  the benchmark
+aiom/core/jarid.py      authoritative ids read from inside each jar
+aiom/core/placement.py  place a project into a host that can load it
+aiom/core/verdict.py    three-condition pass/fail verdict
+aiom/core/isolate.py    bisect isolation of conflicting mods
+aiom/core/launcher.py   install + boot + phase log for all four loaders
+aiom/bench/mixed.py     the full mixed benchmark (100 samples, real server)
+aiom/bench/pureboot.py  the smoke benchmark
+tools/report.py         JSON -> Markdown report
+tools/eco_analysis.py   ecosystem size breakdown
 ```
 
 ## Environment notes

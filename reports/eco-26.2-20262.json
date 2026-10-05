@@ -1,0 +1,1793 @@
+{
+  "mc": "26.2",
+  "seed": 20262,
+  "n": 100,
+  "dep_free": 46,
+  "deps_inside": 0,
+  "deps_outside": 54,
+  "total_required_edges": 77,
+  "both_sides": 100,
+  "client_only": 0,
+  "loader_hist": {
+    "fabric": 56,
+    "bukkit": 4,
+    "forge": 26,
+    "neoforge": 59,
+    "paper": 11,
+    "purpur": 8,
+    "spigot": 8,
+    "quilt": 25,
+    "folia": 8,
+    "velocity": 3,
+    "sponge": 3,
+    "bungeecord": 2,
+    "babric": 1,
+    "bta-babric": 1,
+    "datapack": 1,
+    "java-agent": 1,
+    "legacy-fabric": 1,
+    "liteloader": 1,
+    "modloader": 1,
+    "nilloader": 1,
+    "ornithe": 1,
+    "rift": 1,
+    "waterfall": 1
+  },
+  "rows": [
+    {
+      "slug": "nether-chested",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 3,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "QAGBst4M",
+        "P7dR8mSH",
+        "ohNO6lps"
+      ],
+      "downloads": 6742149
+    },
+    {
+      "slug": "visuality",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 2,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "9s6osm5g",
+        "P7dR8mSH"
+      ],
+      "downloads": 29557708
+    },
+    {
+      "slug": "configapi",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "bukkit",
+        "fabric",
+        "forge",
+        "neoforge",
+        "paper",
+        "purpur",
+        "spigot"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 5926
+    },
+    {
+      "slug": "almanac",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 21039771
+    },
+    {
+      "slug": "debugify",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 36761592
+    },
+    {
+      "slug": "2032-world-height",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "forge",
+        "neoforge",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 700174
+    },
+    {
+      "slug": "automodpack",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "forge",
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 1512701
+    },
+    {
+      "slug": "biome-spawn-point",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "forge",
+        "neoforge",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "e0M1UDsY"
+      ],
+      "downloads": 1700717
+    },
+    {
+      "slug": "dynamic-torches",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "forge",
+        "neoforge",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 771583
+    },
+    {
+      "slug": "litematica",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "GcWjdA9I"
+      ],
+      "downloads": 26053714
+    },
+    {
+      "slug": "terrablender",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "forge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 40395657
+    },
+    {
+      "slug": "ambient-environment",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH"
+      ],
+      "downloads": 9407908
+    },
+    {
+      "slug": "pv-addon-spectator",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "forge",
+        "neoforge",
+        "paper",
+        "spigot"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "1bZhdhsH"
+      ],
+      "downloads": 24565
+    },
+    {
+      "slug": "dungeons-and-taverns-swamp-hut-overhaul",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "forge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 1539656
+    },
+    {
+      "slug": "naturalist",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 11252613
+    },
+    {
+      "slug": "dungeons-and-taverns-nether-fortress-overhaul",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "forge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 800892
+    },
+    {
+      "slug": "jei",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 1,
+      "n_incompatible": 0,
+      "required_ids": [
+        "7tEfOcA7"
+      ],
+      "downloads": 80207908
+    },
+    {
+      "slug": "particle-core",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 3,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "Ha28R6CL",
+        "hYykXjDp",
+        "P7dR8mSH"
+      ],
+      "downloads": 16818128
+    },
+    {
+      "slug": "dungeons-and-taverns-pillager-outpost-overhaul",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "forge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 2591606
+    },
+    {
+      "slug": "owo-lib",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH"
+      ],
+      "downloads": 48831338
+    },
+    {
+      "slug": "rightclickharvest",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "IYY9Siz8"
+      ],
+      "downloads": 12460826
+    },
+    {
+      "slug": "bettergrassify",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 1,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH"
+      ],
+      "downloads": 16824428
+    },
+    {
+      "slug": "veinminer-enchantment",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "folia",
+        "neoforge",
+        "paper",
+        "purpur",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "OhduvhIc"
+      ],
+      "downloads": 17353604
+    },
+    {
+      "slug": "mcwifipnp",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 6998483
+    },
+    {
+      "slug": "cut-through",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "QAGBst4M"
+      ],
+      "downloads": 17916957
+    },
+    {
+      "slug": "unilib",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 10382705
+    },
+    {
+      "slug": "friends-and-foes-forge",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 1,
+      "n_incompatible": 0,
+      "required_ids": [
+        "G1hIVOrD"
+      ],
+      "downloads": 4970980
+    },
+    {
+      "slug": "voxelmap-updated",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH"
+      ],
+      "downloads": 1345420
+    },
+    {
+      "slug": "onekeyminer_nf",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 1306094
+    },
+    {
+      "slug": "customizable-elytra",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 1,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH"
+      ],
+      "downloads": 1502956
+    },
+    {
+      "slug": "easy-magic",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "QAGBst4M"
+      ],
+      "downloads": 13781695
+    },
+    {
+      "slug": "immersive-melodies",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 8970793
+    },
+    {
+      "slug": "better-f1-reborn",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 5140729
+    },
+    {
+      "slug": "srdp",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 2,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "xSlNcCOe",
+        "P7dR8mSH"
+      ],
+      "downloads": 7196360
+    },
+    {
+      "slug": "ping-view",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "forge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 1359834
+    },
+    {
+      "slug": "passive-shield",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "forge",
+        "neoforge",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "e0M1UDsY"
+      ],
+      "downloads": 1404008
+    },
+    {
+      "slug": "capes",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 2,
+      "n_optional": 1,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH",
+        "Ha28R6CL"
+      ],
+      "downloads": 24111007
+    },
+    {
+      "slug": "grass-seeds",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "forge",
+        "neoforge",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "e0M1UDsY"
+      ],
+      "downloads": 974664
+    },
+    {
+      "slug": "easy-npc",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "forge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 2,
+      "n_optional": 1,
+      "n_incompatible": 0,
+      "required_ids": [
+        "Epm6R3P2",
+        "uTGjf7vA"
+      ],
+      "downloads": 1181006
+    },
+    {
+      "slug": "moreculling",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "9s6osm5g"
+      ],
+      "downloads": 67834404
+    },
+    {
+      "slug": "particle-rain",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 1,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH"
+      ],
+      "downloads": 21078319
+    },
+    {
+      "slug": "inventoryhudplus",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "forge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 9958757
+    },
+    {
+      "slug": "tectonic",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "XaDC71GB"
+      ],
+      "downloads": 16704559
+    },
+    {
+      "slug": "viabackwards",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "folia",
+        "paper",
+        "velocity"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 2,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P1OZGk5p"
+      ],
+      "downloads": 2118623
+    },
+    {
+      "slug": "vmp-fabric",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 16934560
+    },
+    {
+      "slug": "shulker-drops-two",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "forge",
+        "neoforge",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "e0M1UDsY"
+      ],
+      "downloads": 1257242
+    },
+    {
+      "slug": "nuit",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH"
+      ],
+      "downloads": 14124510
+    },
+    {
+      "slug": "modernfix-mvus",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH"
+      ],
+      "downloads": 9107097
+    },
+    {
+      "slug": "searchables",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH"
+      ],
+      "downloads": 39891722
+    },
+    {
+      "slug": "bridging-mod",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "1eAoo2KR"
+      ],
+      "downloads": 6496328
+    },
+    {
+      "slug": "minecraftcapes",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 823623
+    },
+    {
+      "slug": "tree-vein-miner",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "forge",
+        "neoforge",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 910743
+    },
+    {
+      "slug": "betterf3",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "9s6osm5g"
+      ],
+      "downloads": 34687035
+    },
+    {
+      "slug": "curios",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 31773787
+    },
+    {
+      "slug": "stuck",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "bukkit",
+        "fabric",
+        "folia",
+        "paper",
+        "purpur",
+        "spigot"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 830
+    },
+    {
+      "slug": "macaws-biomes-o-plenty",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 4,
+      "n_optional": 9,
+      "n_incompatible": 0,
+      "required_ids": [
+        "s3dmwKy5",
+        "kkmrDlKT",
+        "cl5ec0Qm",
+        "HXF82T3G"
+      ],
+      "downloads": 1819542
+    },
+    {
+      "slug": "chunky",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 18608751
+    },
+    {
+      "slug": "ukulib",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 13515192
+    },
+    {
+      "slug": "macaws-roofs",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH"
+      ],
+      "downloads": 7884891
+    },
+    {
+      "slug": "better-clouds",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 2,
+      "n_incompatible": 0,
+      "required_ids": [
+        "1eAoo2KR"
+      ],
+      "downloads": 5392101
+    },
+    {
+      "slug": "freecam",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 21312276
+    },
+    {
+      "slug": "dungeons-and-taverns-ancient-city-overhaul",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 4333827
+    },
+    {
+      "slug": "crash-assistant",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 19558983
+    },
+    {
+      "slug": "security-craft",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 5663544
+    },
+    {
+      "slug": "fair-fight",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "folia",
+        "forge",
+        "neoforge",
+        "paper",
+        "purpur",
+        "quilt",
+        "spigot",
+        "sponge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 2233
+    },
+    {
+      "slug": "pv-addon-lavaplayer-lib",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "bungeecord",
+        "fabric",
+        "folia",
+        "forge",
+        "neoforge",
+        "paper",
+        "purpur",
+        "spigot",
+        "velocity"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "1bZhdhsH"
+      ],
+      "downloads": 71852
+    },
+    {
+      "slug": "tidal-towns",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "forge",
+        "neoforge",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 3972754
+    },
+    {
+      "slug": "clumps",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 39675180
+    },
+    {
+      "slug": "auth-me",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 7145024
+    },
+    {
+      "slug": "veinminer-client",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 2,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "OhduvhIc",
+        "1vrSzlao"
+      ],
+      "downloads": 62899511
+    },
+    {
+      "slug": "libjf",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 15674083
+    },
+    {
+      "slug": "optigui",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 2,
+      "n_optional": 1,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH",
+        "Ha28R6CL"
+      ],
+      "downloads": 26037753
+    },
+    {
+      "slug": "zombie-horse-spawn",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "forge",
+        "neoforge",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "e0M1UDsY"
+      ],
+      "downloads": 1118379
+    },
+    {
+      "slug": "pl3xmap",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "bukkit",
+        "fabric",
+        "folia",
+        "paper",
+        "purpur",
+        "quilt",
+        "spigot"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH"
+      ],
+      "downloads": 103591
+    },
+    {
+      "slug": "spell-engine",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 5,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "9s6osm5g",
+        "8ooWzSQP",
+        "P7dR8mSH",
+        "ha1mEyJS",
+        "XaT8sLP6"
+      ],
+      "downloads": 6105983
+    },
+    {
+      "slug": "konkrete",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 62484771
+    },
+    {
+      "slug": "azurelib",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 11592785
+    },
+    {
+      "slug": "illager-invasion",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 3,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "QAGBst4M",
+        "ohNO6lps",
+        "P7dR8mSH"
+      ],
+      "downloads": 7967076
+    },
+    {
+      "slug": "stoneworks",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 3,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "QAGBst4M",
+        "ohNO6lps",
+        "P7dR8mSH"
+      ],
+      "downloads": 9995377
+    },
+    {
+      "slug": "no-chat-reports",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 1,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 58780547
+    },
+    {
+      "slug": "fabric-language-kotlin",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 123089957
+    },
+    {
+      "slug": "yosbr",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 23873827
+    },
+    {
+      "slug": "better-shulkers",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "folia",
+        "forge",
+        "neoforge",
+        "paper",
+        "purpur",
+        "quilt",
+        "spigot",
+        "sponge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 4793
+    },
+    {
+      "slug": "durability-tooltip",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 2,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "LN9BxssP",
+        "P7dR8mSH"
+      ],
+      "downloads": 14389630
+    },
+    {
+      "slug": "spawn-animations",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "neoforge",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 2,
+      "n_optional": 5,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH",
+        "qvIfYCYJ"
+      ],
+      "downloads": 7043503
+    },
+    {
+      "slug": "pv-addon-sculk",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "forge",
+        "neoforge",
+        "paper"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "1bZhdhsH"
+      ],
+      "downloads": 82062
+    },
+    {
+      "slug": "shatterbyte-lib",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 16478729
+    },
+    {
+      "slug": "explorers-compass",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 11775265
+    },
+    {
+      "slug": "visual-workbench",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "QAGBst4M"
+      ],
+      "downloads": 25963828
+    },
+    {
+      "slug": "hide-experimental-warning",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "forge",
+        "neoforge",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "e0M1UDsY"
+      ],
+      "downloads": 875330
+    },
+    {
+      "slug": "midnightlib",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 28708993
+    },
+    {
+      "slug": "stack-refill",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "forge",
+        "neoforge",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "e0M1UDsY"
+      ],
+      "downloads": 2094737
+    },
+    {
+      "slug": "more-music-discs",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "WQaxNzFg"
+      ],
+      "downloads": 1617220
+    },
+    {
+      "slug": "presence-footsteps",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "quilt"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 1,
+      "n_incompatible": 0,
+      "required_ids": [
+        "P7dR8mSH"
+      ],
+      "downloads": 39960746
+    },
+    {
+      "slug": "craftpresence",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [
+        "nT86WUER"
+      ],
+      "downloads": 13454989
+    },
+    {
+      "slug": "stringandsand",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "babric",
+        "bta-babric",
+        "bukkit",
+        "bungeecord",
+        "datapack",
+        "fabric",
+        "folia",
+        "forge",
+        "java-agent",
+        "legacy-fabric",
+        "liteloader",
+        "modloader",
+        "neoforge",
+        "nilloader",
+        "ornithe",
+        "paper",
+        "purpur",
+        "quilt",
+        "rift",
+        "spigot",
+        "sponge",
+        "velocity",
+        "waterfall"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 188
+    },
+    {
+      "slug": "replaymod",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 18933913
+    },
+    {
+      "slug": "crate-delight",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 0,
+      "n_optional": 0,
+      "n_incompatible": 0,
+      "required_ids": [],
+      "downloads": 3757494
+    },
+    {
+      "slug": "respackopts",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric",
+        "neoforge"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 1,
+      "n_incompatible": 0,
+      "required_ids": [
+        "WKwQAwke"
+      ],
+      "downloads": 10710290
+    },
+    {
+      "slug": "sodium-extra",
+      "ok": true,
+      "type": "mod",
+      "loaders": [
+        "fabric"
+      ],
+      "client_side": "required",
+      "server_side": "required",
+      "n_required": 1,
+      "n_optional": 3,
+      "n_incompatible": 0,
+      "required_ids": [
+        "AANobbMI"
+      ],
+      "downloads": 99438840
+    }
+  ]
+}

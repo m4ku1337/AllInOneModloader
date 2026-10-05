@@ -7,6 +7,7 @@ denominator is not a result.
 from __future__ import annotations
 
 import json
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -231,10 +232,46 @@ def render(report_path: Path, out_path: Path | None = None) -> Path:
     return Path(out_path)
 
 
-if __name__ == "__main__":
-    import sys
-    src = Path(sys.argv[1] if len(sys.argv) > 1
-               else "reports/mixed-26.2-20262.json")
-    dst = Path(sys.argv[2]) if len(sys.argv) > 2 else None
+USAGE = """usage: report.py [SRC] [DST]
+
+Render a benchmark JSON report into a readable Markdown deliverable.
+
+  SRC   benchmark JSON produced by aiom.bench.mixed
+        (default: reports/mixed-26.2-20262.json)
+  DST   output .md path (default: SRC with an .md suffix)
+
+Example:
+  python tools/report.py reports/mixed.json reports/REPORT.md
+"""
+
+
+def main(argv: list[str]) -> int:
+    args = [a for a in argv if not a.startswith("-")]
+    if any(a in ("-h", "--help") for a in argv):
+        print(USAGE)
+        return 0
+
+    src = Path(args[0]) if args else Path("reports/mixed-26.2-20262.json")
+    dst = Path(args[1]) if len(args) > 1 else None
+
+    if not src.is_file():
+        print(f"error: no such report: {src}", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
+        return 1
+    try:
+        d = json.loads(src.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        print(f"error: {src} is not valid JSON: {exc}", file=sys.stderr)
+        return 1
+    if "results" not in d:
+        print(f"error: {src} has no 'results' key -- "
+              "is it a benchmark report?", file=sys.stderr)
+        return 1
+
     p = render(src, dst)
     print(f"wrote {p}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
