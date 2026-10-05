@@ -590,10 +590,77 @@ Fabric 的安装器在网络不稳时不下载官方 server jar，且 `subproces
 - **阶段日志**（`[aiom] ...` 写入 `logs/phases.log` 并以 `if: always()` 上传）——
   job 被超时杀掉时 GitHub 会丢弃控制台日志，artifact 是唯一证据
 - **外层 `timeout`**——各阶段预算约束的是单次等待，没有约束总和
-- **35 项单元测试**接入 CI，覆盖就绪判定、预算、进程隔离、平台选择
+- **单元测试**接入 CI（现46 项），覆盖就绪判定、预算、进程隔离、平台选择、
+  坐标解析与安装器日志发现
 
 最终六个 job 全绿：fabric 47s / forge 56s / neoforge 11s / paper 57s /
 unit tests 69s / bench smoke 12s。
 
 **教训**：这六条里有四条的失败形态都是"看起来像加载器坏了"。本地全绿
 不等于正确，尤其当验证代码本身依赖平台特性、日志通道和文件布局时。
+
+---
+
+## 十四、按文档使用暴露的三个缺陷（单元测试全绿时一个都没出现）
+
+前六个 bug 是 CI 暴露的。这一节不同：**六个 job 全绿之后**，从零克隆仓库、
+严格照 README 的命令走一遍，又发现三个问题。它们的共同点是
+**只有真实使用才会碰到**——测试全绿、CI 全绿，文档与代码之间却对不上。
+
+### 1. 交付物被 .gitignore 挡在仓库外
+
+README 把 90.9% 这个数字归因给 `reports/REPORT-26.2.md`，而整个 `reports/`
+被 `.gitignore` 忽略。于是新克隆的仓库里那个链接是死链，**支撑全部结论的
+实测数据根本不在仓库中**。任何人 clone 下来都无法核对 README 里的数字。
+
+改为白名单提交 4 个实测产物（报告 + 原始 JSON + 生态/归位分析），
+临时重跑产生的中间文件仍然忽略。
+
+### 2. 坐标 harvest 抓不到安装器真正打印的内容
+
+全新克隆跑冒烟基准，NeoForge 装不上：预取了 32 个 jar 之后仍然报
+`These libraries failed to download`。两层原因，都在 harvest 这一层：
+
+**其一，日志文件名写死。** 代码读 `installer.log`，而 NeoForge 写的是
+`nf-installer.jar.log`。注意这个名字**取决于调用方**——`instance.py`
+走的又是 `installer.log`，所以正确的做法是 glob `*.log` 而不是猜名字。
+
+**其二，坐标正则要求整行匹配。** 安装器实际打印的是
+
+```
+Considering library net.neoforged:JarJarMetadata:0.5.1
+```
+
+而 `_coords_to_urls` 用 `re.fullmatch` 要求整行就是裸坐标。真实日志里
+**55 行**这种带标签的坐标全部被拒，只捞到 2 行。顺带发现字符类漏了 `+`，
+`net.fabricmc:sponge-mixin:0.17.3+mixin.0.8.7` 这类合法版本号也匹配不到。
+
+用真实失败日志验证，修复后解析出的坐标从 **2 个涨到 28 个**，
+此前卡住的 `JarJarMetadata` / `JarJarSelector` / `mergetool:2.0.7:api`
+全部命中。端到端重跑，NeoForge 从 `PREPARE FAILED`（127 秒装不上）
+变成 `installed (13s)`。
+
+> 有意思的是，仓库里原本有一条测试断言 `Considering library` 行
+> **应该被忽略**——它与真实需求正好相反。这条测试绿灯了这么久，
+> 反而把 bug 固定住了。
+
+### 3. 预取没有重试，一次抖动即永久失败
+
+预取对每个 URL 只试一次。实测一次 `Connection reset` 就让安装器把该坐标
+判为永久不可用：预取放弃，安装器自己的 Java 客户端被同样阻断，两者叠加，
+这个 jar 就再也装不上了。**同一个 URL 在 reset 之后连续三次返回 200**，
+说明失败是瞬时的。加 `AIOM_PREFETCH_ATTEMPTS`（默认 3）后解决。
+
+手工验证的终态：curl 预置最后一个缺失坐标
+`net.neoforged:accesstransformers:11.0.2`，重跑安装器输出
+`The server installed successfully`，71 个 jar 与两个 args 文件齐备。
+
+### 一个仍未在本机解决的问题（环境限制，非代码缺陷）
+
+本机网络会重置安装器 Java 客户端的连接，表现为**每次只报一个坐标失败**，
+且每次报的坐标都不同（先是 `JarJarSelector`，再是 `accesstransformers`），
+看起来像随机故障。预取已经能覆盖安装器打印的全部坐标，但安装器仍在下载
+阶段被重置。**CI runner 上不受影响**——`neoforge 26.2` job 稳定 11 秒通过。
+
+因此本机跑完整基准可能失败，这不是代码问题，而是网络环境问题。
+使用者若遇到同样情况，按 README「受限网络下的调优」一节放宽预算即可。

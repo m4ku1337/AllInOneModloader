@@ -116,6 +116,27 @@ Minecraft 26.2 得到了四大生态的完整支持，本项目对它们逐一�
   Java 21 无法运行。若自动探测失败，可设置 `AIOM_JAVA_HOME` 指定路径。
 - `curl` —— 作为网络回退方案使用（原因见下）。
 - 需能访问 Mojang piston-meta、Modrinth 以及各加载器的 maven 仓库。
+- Python 3.11+，无第三方依赖，标准库即可运行。
+
+### 受限网络下的调优
+
+部分网络环境会重置**安装器自带的 Java HTTP 客户端**的连接（本项目开发
+过程中即遇到）。加载器会解析安装器打印的 maven 坐标、用 `curl` 预取这些
+jar，再重跑安装器使其在本地完成解析。若仍失败，可放宽预算：
+
+| 环境变量 | 默认 | 作用 |
+|---|---|---|
+| `AIOM_PREFETCH_TIMEOUT` | 900 | 预取整体预算（秒） |
+| `AIOM_PREFETCH_URL_TIMEOUT` | 120 | 单个 URL 超时（秒） |
+| `AIOM_PREFETCH_ATTEMPTS` | 3 | 单个 URL 重试次数 |
+| `AIOM_PROBE_TIMEOUT` | 420 | 探测轮预算（秒） |
+| `AIOM_INSTALL_TIMEOUT` | 1500 | 安装轮预算（秒） |
+
+```bash
+# 网络较差时
+AIOM_PREFETCH_TIMEOUT=1800 AIOM_PREFETCH_ATTEMPTS=5 \
+  python -m aiom.bench.mixed -n 100 --seed 20262 --out reports/mixed.json
+```
 
 ## 四、使用方法
 
@@ -320,6 +341,28 @@ Every false start and its fix is documented in
   work). Set `AIOM_JAVA_HOME` if auto-detection fails.
 - `curl`, used as the network fallback.
 - Access to Mojang piston-meta, Modrinth, and the loader mavens.
+- Python 3.11+, standard library only, no third-party packages.
+
+### Tuning on a restricted network
+
+Some networks reset connections from the **installer's own Java HTTP client**
+— a problem encountered while developing this project. The launcher parses the
+maven coordinates the installer prints, mirrors those jars with `curl`, then
+re-runs the installer so it resolves locally. If it still fails, widen the
+budgets:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `AIOM_PREFETCH_TIMEOUT` | 900 | whole-pass prefetch budget (s) |
+| `AIOM_PREFETCH_URL_TIMEOUT` | 120 | per-URL timeout (s) |
+| `AIOM_PREFETCH_ATTEMPTS` | 3 | retries per URL |
+| `AIOM_PROBE_TIMEOUT` | 420 | probe pass budget (s) |
+| `AIOM_INSTALL_TIMEOUT` | 1500 | install pass budget (s) |
+
+```bash
+AIOM_PREFETCH_TIMEOUT=1800 AIOM_PREFETCH_ATTEMPTS=5 \
+  python -m aiom.bench.mixed -n 100 --seed 20262 --out reports/mixed.json
+```
 
 ## Usage
 
