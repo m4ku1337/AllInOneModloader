@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from http.client import IncompleteRead
 from pathlib import Path
 from unittest import mock
 
@@ -129,59 +130,76 @@ class InstallerTimeoutTests(unittest.TestCase):
 
 
 class HttpFallbackBudgetTests(unittest.TestCase):
-    """curl may only spend what urllib left, never a second full budget."""
+    """curl leads because only it can bound a whole transfer."""
 
-    def test_fallback_inherits_remaining_budget(self):
+    def test_curl_is_tried_first(self):
         with mock.patch.object(http, "_has_curl", return_value=True), \
-                mock.patch.object(http.urllib.request, "urlopen",
-                                  side_effect=http.urllib.error.URLError("x")), \
                 mock.patch.object(http.subprocess, "run",
                                   return_value=subprocess.CompletedProcess(
-                                      [], 0, b"ok", b"")) as run, \
-                mock.patch.object(http.time, "monotonic",
-                                  side_effect=[0.0, 55.0]):
-            self.assertEqual(http.fetch_bytes("https://x/y", timeout=60), b"ok")
+                                      [], 0, b"payload", b"")) as run:
+            self.assertEqual(http.fetch_bytes("https://x/y"), b"payload")
         cmd = run.call_args.args[0]
-        self.assertEqual(int(cmd[cmd.index("--max-time") + 1]), 5)
+        self.assertEqual(int(cmd[cmd.index("--max-time") + 1]), 300)
+        self.assertIsNotNone(run.call_args.kwargs.get("timeout"),
+                             "subprocess.run must carry its own timeout")
 
-    def test_no_budget_left_reraises(self):
-        with mock.patch.object(http, "_has_curl", return_value=True), \
-                mock.patch.object(http.urllib.request, "urlopen",
-                                  side_effect=http.urllib.error.URLError("x")), \
-                mock.patch.object(http.subprocess, "run") as run, \
-                mock.patch.object(http.time, "monotonic",
-                                  side_effect=[0.0, 59.9]):
-            with self.assertRaises(http.urllib.error.URLError):
-                http.fetch_bytes("https://x/y", timeout=60)
-        run.assert_not_called()
-
-    def test_urllib_success_does_not_invoke_curl(self):
-        import io
-
+    def test_urllib_used_when_curl_missing(self):
         resp = mock.MagicMock()
         resp.read.return_value = b"payload"
         resp.__enter__.return_value = resp
         resp.__exit__.return_value = False
-        with mock.patch.object(http.urllib.request, "urlopen",
-                               return_value=resp), \
-                mock.patch.object(http.subprocess, "run") as run:
+        with mock.patch.object(http, "_has_curl", return_value=False), \
+                mock.patch.object(http.urllib.request, "urlopen",
+                                  return_value=resp) as urlopen:
             self.assertEqual(http.fetch_bytes("https://x/y"), b"payload")
-        run.assert_not_called()
+        urlopen.assert_called_once()
+
+    def test_incomplete_read_does_not_escape(self):
+        # The bug this whole policy exists for: IncompleteRead is an
+        # HTTPException, not an OSError, so it bypassed the handler meant to
+        # reach the other transport and killed the run outright.
+        resp = mock.MagicMock()
+        resp.read.side_effect = IncompleteRead(b"partial")
+        resp.__enter__.return_value = resp
+        resp.__exit__.return_value = False
+        with mock.patch.object(http, "_has_curl", return_value=False), \
+                mock.patch.object(http.urllib.request, "urlopen",
+                                  return_value=resp):
+            with self.assertRaises(IncompleteRead):
+                http.fetch_bytes("https://x/y")
+
+    def test_curl_failure_falls_back_to_urllib(self):
+        resp = mock.MagicMock()
+        resp.read.return_value = b"payload"
+        resp.__enter__.return_value = resp
+        resp.__exit__.return_value = False
+        with mock.patch.object(http, "_has_curl", return_value=True), \
+                mock.patch.object(http.subprocess, "run",
+                                  side_effect=subprocess.TimeoutExpired(
+                                      "curl", 1)), \
+                mock.patch.object(http.urllib.request, "urlopen",
+                                  return_value=resp):
+            self.assertEqual(http.fetch_bytes("https://x/y"), b"payload")
+
+    def test_both_fail_reports_the_curl_error(self):
+        """Callers see why the preferred transport gave up, not a red herring."""
+        curl_exc = subprocess.CalledProcessError(22, "curl")
+        with mock.patch.object(http, "_has_curl", return_value=True), \
+                mock.patch.object(http.subprocess, "run",
+                                  side_effect=curl_exc), \
+                mock.patch.object(http.urllib.request, "urlopen",
+                                  side_effect=IncompleteRead(
+                                      b"partial")):
+            with self.assertRaises(subprocess.CalledProcessError):
+                http.fetch_bytes("https://x/y")
 
     def test_curl_process_has_a_python_side_timeout(self):
-        # curl's --max-time bounds the transfer but not a hung spawn or a stuck
-        # DNS lookup; without this the caller waits forever.
         with mock.patch.object(http, "_has_curl", return_value=True), \
-                mock.patch.object(http.urllib.request, "urlopen",
-                                  side_effect=http.urllib.error.URLError("x")), \
                 mock.patch.object(http.subprocess, "run",
                                   return_value=subprocess.CompletedProcess(
-                                      [], 0, b"ok", b"")) as run, \
-                mock.patch.object(http.time, "monotonic",
-                                  side_effect=[0.0, 0.0]):
+                                      [], 0, b"ok", b"")) as run:
             http.fetch_bytes("https://x/y", timeout=60)
-        self.assertIsNotNone(run.call_args.kwargs.get("timeout"),
-                             "subprocess.run must carry its own timeout")
+        self.assertEqual(run.call_args.kwargs["timeout"], 75)
 
 
 class JavaProbeTests(unittest.TestCase):

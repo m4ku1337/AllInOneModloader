@@ -289,6 +289,22 @@ def _coords_to_urls(blob: str) -> set[str]:
     return urls
 
 
+_PHASE_LOG: Path | None = None
+
+
+def _phase_file(instance: Path) -> Path:
+    """Where phase lines are mirrored for CI artifacts.
+
+    A job killed at its timeout loses its console log, so a stall would leave
+    no trace of which phase it stalled in. This file is uploaded with
+    `if: always()` and survives that.
+    """
+    global _PHASE_LOG
+    log = instance / "logs" / "phases.log"
+    _PHASE_LOG = log
+    return log
+
+
 def _say(msg: str) -> None:
     """Progress line for CI logs.
 
@@ -297,7 +313,15 @@ def _say(msg: str) -> None:
     installer, or waiting on a download. Each wait has its own budget now, so
     naming the phase tells you which one to look at.
     """
-    print(f"[aiom] {msg}", file=sys.stderr, flush=True)
+    line = f"[aiom] {msg}"
+    print(line, file=sys.stderr, flush=True)
+    if _PHASE_LOG is not None:
+        try:
+            _PHASE_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with _PHASE_LOG.open("a", encoding="utf-8") as fh:
+                fh.write(f"{time.strftime('%H:%M:%S')} {line}\n")
+        except OSError:
+            pass  # Diagnostics must never be the reason a run fails.
 
 
 def _env_int(name: str, default: int) -> int:
@@ -540,6 +564,7 @@ def launch(loader: str, instance: Path, timeout: int = 210,
     """Install + boot `loader` in `instance` and classify the result."""
     instance.mkdir(parents=True, exist_ok=True)
     log = instance / "logs" / f"{loader}-boot.log"
+    _phase_file(instance)
     started = time.time()
     _say(f"{loader}: preparing instance at {instance}")
     try:
@@ -554,6 +579,8 @@ def launch(loader: str, instance: Path, timeout: int = 210,
         else:
             raise ValueError(f"unsupported loader {loader}")
     except Exception as exc:
+        _say(f"{loader}: PREPARE FAILED after {time.time() - started:.0f}s: "
+             f"{type(exc).__name__}: {exc}")
         return LaunchResult(Outcome.FAIL_PREPARE, time.time() - started, None,
                             log, detail=f"{type(exc).__name__}: {exc}"[:300])
     _say(f"{loader}: installed ({time.time() - started:.0f}s); booting "
@@ -564,6 +591,8 @@ def launch(loader: str, instance: Path, timeout: int = 210,
     # "Done (" is emitted only after full initialisation on every loader.
     out, code = boot(cmd, log, timeout, instance, stop_marker="Done (")
     outcome, why = classify(out, code)
+    _say(f"{loader}: {outcome.value} after {time.time() - started:.0f}s "
+         f"({why})")
     return LaunchResult(outcome, time.time() - started, code, log,
                         detail=f"{detail}; {why}; java {major}",
                         log_tail=tail(out))
