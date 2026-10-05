@@ -196,6 +196,52 @@ class ServerFileLogTests(unittest.TestCase):
         self.assertFalse(tail.contains("anything"))
 
 
+class ProcessIsolationTests(unittest.TestCase):
+    """The server must get its own process group, or stopping it kills us.
+
+    Without `start_new_session=True` the child shares this process's group, so
+    the `killpg` in _stop_tree signals the launcher too. The run then dies
+    mid-verdict on Linux: no result line, no boot log, and a job that looks
+    like the server never started when it in fact booted fine.
+    """
+
+    def test_child_gets_its_own_session_on_posix(self):
+        tmp = Path(tempfile.mkdtemp())
+        script = tmp / "echo.py"
+        script.write_text("print('up', flush=True)\n", encoding="utf-8")
+        import sys as _sys
+        import subprocess as _sp
+        real_popen = _sp.Popen
+        seen = {}
+
+        def spy(*a, **kw):
+            seen.update(kw)
+            return real_popen(*a, **kw)
+
+        with mock.patch.object(launcher.subprocess, "Popen", side_effect=spy):
+            launcher.boot([_sys.executable, str(script)], tmp / "b.log",
+                          timeout=10, cwd=tmp)
+        # `is not True` rather than truthiness: on Windows we pass False.
+        self.assertIsNot(seen.get("start_new_session"), None)
+        self.assertEqual(seen["start_new_session"],
+                         launcher.os.name != "nt")
+
+    def test_verdict_is_written_after_stopping_the_server(self):
+        tmp = Path(tempfile.mkdtemp())
+        script = tmp / "srv.py"
+        script.write_text(
+            "import time\n"
+            "print('Done (0.1s)!', flush=True)\n"
+            "time.sleep(120)\n", encoding="utf-8")
+        import sys as _sys
+        out, _code = launcher.boot([_sys.executable, str(script)], tmp / "b.log",
+                                  timeout=30, stop_marker="Done (", cwd=tmp)
+        outcome, _why = launcher.classify(out, None)
+        self.assertEqual(outcome, launcher.Outcome.PASS)
+        # The whole point: control returns so the caller can record a verdict.
+        self.assertTrue((tmp / "b.log").is_file())
+
+
 class ArgsFileSelectionTests(unittest.TestCase):
     """The installer writes both args files everywhere; pick by platform.
 

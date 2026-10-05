@@ -113,6 +113,9 @@ def boot(cmd: list[str], log: Path, timeout: int,
         cmd, cwd=str(Path(cwd).resolve()), stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, text=True, encoding="utf-8",
         errors="replace", bufsize=1,
+        # Its own session/process group on POSIX, so stopping the server tree
+        # cannot signal this process. See _stop_tree.
+        start_new_session=(os.name != "nt"),
     )
     chunks: list[str] = []
 
@@ -225,6 +228,12 @@ def _stop_tree(proc: subprocess.Popen, cwd: Path) -> None:
         subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                        capture_output=True, check=False)
     else:
+        # Kill only our own child, never a process group. The child inherits
+        # this process's group unless we put it in a new one, so `killpg` on
+        # its group id also signals us -- the run then dies right here,
+        # silently, before it can write the verdict for the server that was
+        # starting up fine. `Popen(start_new_session=True)` (see boot()) gives
+        # the child its own group, making killpg correct again.
         try:
             import signal
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
