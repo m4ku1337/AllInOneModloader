@@ -384,9 +384,22 @@ def _coords_to_urls(blob: str) -> set[str]:
         parts = line.split(":")
         group, artifact, version = parts[0], parts[1], parts[2]
         ext = "jar"
+        suffix = ""
         if len(parts) > 3:
-            continue  # classified artifacts are not required for the server
-        path = f"{group.replace('.', '/')}/{artifact}/{version}/{artifact}-{version}.{ext}"
+            # Classified artifacts used to be skipped on the assumption that a
+            # server never needs one. NeoForge 26.2 disproves that: it fails
+            # with "These libraries failed to download" for
+            # net.neoforged:mergetool:2.0.7:api and friends, and the failure
+            # names coordinates rather than URLs -- so skipping them here left
+            # the prefetcher with nothing to fetch and the install never
+            # completed. Maven spells the `:api` classifier as an `-api` suffix.
+            classifier = parts[3]
+            if classifier in {"api", "dev", "sources", "javadoc"}:
+                suffix = f"-{classifier}"
+            else:
+                continue
+        path = (f"{group.replace('.', '/')}/{artifact}/{version}/"
+                f"{artifact}-{version}{suffix}.{ext}")
         urls.add(f"https://maven.neoforged.net/releases/{path}")
         urls.add(f"https://libraries.minecraft.net/{path}")
         urls.add(f"https://maven.minecraftforge.net/{path}")
@@ -488,10 +501,25 @@ def _run_installer(instance: Path, installer: Path, attempts: int = 2) -> str:
     # the installer jar itself becomes unresolvable.
     jar = str(installer.resolve())
 
+    # Accumulate coordinates across passes. The installer reports only the
+    # batch it happened to fail on, and each run reveals a different batch, so
+    # a pass that kept only its own coordinates would keep re-discovering the
+    # same jars from scratch and never converge.
+    seen: set[str] = set()
+
+    def harvest(blob: str) -> set[str]:
+        found = set(re.findall(r"https?://[^\s,\"]+\.jar", blob))
+        found |= _coords_to_urls(blob)
+        # `nonlocal` is required: assigning into `seen` from inside this
+        # closure would otherwise make Python treat it as a local and blow up
+        # with UnboundLocalError on the first call.
+        nonlocal seen
+        seen |= found
+        return found
+
     _say(f"installer probe pass (budget {PROBE_TIMEOUT}s)")
     blob = _run_installer_once(instance, jar, PROBE_TIMEOUT)
-    urls = set(re.findall(r"https?://[^\s,\"]+\.jar", blob))
-    urls |= _coords_to_urls(blob)
+    urls = harvest(blob)
     _say(f"probe done: {len(urls)} candidate jars; prefetching")
     fetched = _prefetch(instance, " ".join(urls))
     _say(f"prefetch mirrored {fetched} jars")
@@ -502,14 +530,24 @@ def _run_installer(instance: Path, installer: Path, attempts: int = 2) -> str:
         _say(f"installer install pass {i + 1}/{max(1, attempts - 1)} "
              f"(budget {INSTALL_TIMEOUT}s)")
         blob = _run_installer_once(instance, jar, INSTALL_TIMEOUT)
-        urls = set(re.findall(r"https?://[^\s,\"]+\.jar", blob))
-        urls |= _coords_to_urls(blob)
-        fetched += _prefetch(instance, " ".join(urls))
+        # Re-mirror everything known so far, not just this pass's findings.
+        fetched += _prefetch(instance, " ".join(harvest(blob)))
         _say(f"prefetch mirrored {fetched} jars in total")
         if _installer_done(instance):
-            break
-    else:
-        _say("installer never produced an args file")
+            return blob
+
+    # Final sweep. Each pass only reveals the *next* batch of coordinates once
+    # the previous batch is satisfied, so stopping the loop the moment the
+    # budget runs out leaves the last reported failures unfetched -- which is
+    # exactly what happened: the run ended reporting two missing jars that we
+    # had never been given a chance to mirror. The installer is cheap to re-run
+    # against a complete local library set.
+    _say("installer still incomplete; final prefetch sweep")
+    blob = _run_installer_once(instance, jar, INSTALL_TIMEOUT)
+    fetched += _prefetch(instance, " ".join(harvest(blob)))
+    if _installer_done(instance):
+        return blob
+    _say(f"prefetch mirrored {fetched} jars in total; still no args file")
     return blob
 
 

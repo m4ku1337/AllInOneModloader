@@ -132,12 +132,19 @@ python -m aiom.core.javart          # 定位 Java 25+ 运行时
 python -m aiom.core.modrinth 26.2   # 生态规模与抽样示例
 
 # 运行基准测试
-python -m aiom.bench.pureboot -n 100 --seed 20262
+# 完整混合基准（拉起真实服务端，约 5 分钟）
+python -m aiom.bench.mixed -n 100 --seed 20262 --out reports/mixed.json
+
+# 冒烟版（只验基准工具自身是否可用，数十秒）
+python -m aiom.bench.pureboot -n 2 --loaders neoforge --out reports/smoke.json
+
+# 生成人类可读报告
+python tools/report.py reports/mixed.json reports/REPORT.md
 ```
 
-报告输出至 `reports/pureboot-<mc>-<seed>.json`。
-
-实测结果见 [`docs/BENCHMARK.md`](docs/BENCHMARK.md)。
+完整基准报告输出至 `--out` 指定的路径。实测结果见
+[`reports/REPORT-26.2.md`](reports/REPORT-26.2.md) 与
+[`docs/MIXED_LOADING.md`](docs/MIXED_LOADING.md)。
 
 ## 五、项目结构
 
@@ -301,10 +308,19 @@ python -m aiom.core.launcher fabric      # also: neoforge / forge / paper
 python -m aiom.core.mcmeta               # version metadata + required Java
 python -m aiom.core.javart               # locate a Java 25+ runtime
 python -m aiom.core.modrinth 26.2        # ecosystem sizes + sample projects
-python -m aiom.bench.pureboot -n 100 --seed 20262
+
+# Full mixed benchmark: boots a real server, ~5 minutes
+python -m aiom.bench.mixed -n 100 --seed 20262 --out reports/mixed.json
+
+# Smoke variant: exercises the harness only, seconds
+python -m aiom.bench.pureboot -n 2 --loaders neoforge --out reports/smoke.json
+
+# Render the JSON into a readable report
+python tools/report.py reports/mixed.json reports/REPORT.md
 ```
 
-Measured results: [`docs/BENCHMARK.md`](docs/BENCHMARK.md).
+Measured results: [`reports/REPORT-26.2.md`](reports/REPORT-26.2.md) and
+[`docs/MIXED_LOADING.md`](docs/MIXED_LOADING.md).
 
 ## Project layout
 

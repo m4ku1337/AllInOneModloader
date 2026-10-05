@@ -232,5 +232,43 @@ class JavaProbeTests(unittest.TestCase):
         self.assertEqual(javart._VERSION_CACHE[str(java)], 25)
 
 
+class MavenCoordinateTests(unittest.TestCase):
+    """Coordinates must survive the trip from installer text to a real URL."""
+
+    def test_plain_coordinate_yields_plain_jar(self):
+        urls = launcher._coords_to_urls("net.neoforged:mergetool:2.0.7")
+        self.assertIn("https://maven.neoforged.net/releases/"
+                      "net/neoforged/mergetool/2.0.7/mergetool-2.0.7.jar", urls)
+
+    def test_api_classifier_is_not_dropped(self):
+        # Skipping classified artifacts looked safe until NeoForge 26.2
+        # refused to install without net.neoforged:mergetool:2.0.7:api. Maven
+        # spells the `:api` classifier as an `-api` filename suffix.
+        urls = launcher._coords_to_urls("net.neoforged:mergetool:2.0.7:api")
+        self.assertIn("https://maven.neoforged.net/releases/"
+                      "net/neoforged/mergetool/2.0.7/mergetool-2.0.7-api.jar",
+                      urls)
+
+    def test_unknown_classifier_is_skipped(self):
+        # `sources`/`javadoc` are never needed to run; fetching them would
+        # only waste the budget.
+        urls = launcher._coords_to_urls("some.group:some-artifact:1.0:weird")
+        self.assertEqual(urls, set())
+
+    def test_relpath_round_trips_to_libraries_location(self):
+        urls = launcher._coords_to_urls(
+            "net.neoforged.fancymodloader:loader:11.0.16")
+        rel = {launcher._maven_relpath(u) for u in urls}
+        self.assertIn("net/neoforged/fancymodloader/loader/11.0.16/"
+                      "loader-11.0.16.jar", rel)
+
+    def test_non_coordinate_lines_are_ignored(self):
+        blob = ("Considering library net.neoforged:mergetool:2.0.7\n"
+                "File .\\libraries\\foo.jar exists. Checksum valid.\n"
+                "https://example.com/explicit.jar\n")
+        urls = launcher._coords_to_urls(blob)
+        self.assertNotIn("https://example.com/explicit.jar", urls)
+
+
 if __name__ == "__main__":
     unittest.main()
