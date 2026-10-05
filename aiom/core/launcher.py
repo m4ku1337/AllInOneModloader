@@ -135,11 +135,18 @@ def boot(cmd: list[str], log: Path, timeout: int,
 
     deadline = time.time() + timeout
     stop_at: float | None = None
+    # Paper and Forge do not report readiness on stdout: they log to
+    # logs/latest.log inside the instance and leave the pipe nearly empty. The
+    # server reached `Done (...)` and kept running happily either way, so
+    # scoring the run from the pipe alone marked two healthy loaders as broken.
+    # Watch the file too, tailing only what is new so the cost stays flat.
+    watched = _LogTail(cwd)
     try:
         while True:
-            if stop_marker and stop_at is None and seen_marker.is_set():
-                # Give the server a moment to finish flushing, then stop it.
-                stop_at = time.time() + 20
+            if stop_marker and stop_at is None:
+                if seen_marker.is_set() or watched.contains(stop_marker):
+                    # Give the server a moment to finish flushing, then stop it.
+                    stop_at = time.time() + 20
             now = time.time()
             if stop_at is not None and now >= stop_at:
                 break
@@ -153,8 +160,50 @@ def boot(cmd: list[str], log: Path, timeout: int,
             _stop_tree(proc, cwd)
         reader.join(timeout=5)
     out = "".join(chunks)
+    if watched.text:
+        out += "\n--- server log ---\n" + watched.text
     log.write_text(out, encoding="utf-8")
     return out, proc.returncode
+
+
+class _LogTail:
+    """Incremental reader for the log file a server writes beside the pipe."""
+
+    _NAMES = ("latest.log", "debug.log")
+
+    def __init__(self, cwd: Path) -> None:
+        self._cwd = Path(cwd)
+        self._pos: dict[Path, int] = {}
+        self.text = ""
+
+    def _files(self) -> list[Path]:
+        base = self._cwd / "logs"
+        if not base.is_dir():
+            return []
+        return [base / n for n in self._NAMES if (base / n).is_file()]
+
+    def _pump(self) -> str:
+        found = []
+        for path in self._files():
+            start = self._pos.get(path, 0)
+            try:
+                size = path.stat().st_size
+                if size < start:  # rotated or truncated
+                    start = 0
+                if size == start:
+                    continue
+                with path.open("r", encoding="utf-8", errors="replace") as fh:
+                    fh.seek(start)
+                    blob = fh.read()
+                self._pos[path] = start + len(blob)
+                found.append(blob)
+            except OSError:
+                continue
+        return "".join(found)
+
+    def contains(self, needle: str) -> bool:
+        self.text += self._pump()
+        return needle in self.text
 
 
 def _stop_tree(proc: subprocess.Popen, cwd: Path) -> None:

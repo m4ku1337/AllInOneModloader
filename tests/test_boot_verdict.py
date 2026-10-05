@@ -119,6 +119,83 @@ class FabricProfileTests(unittest.TestCase):
         server_jar.assert_not_called()
 
 
+class ServerFileLogTests(unittest.TestCase):
+    """Paper and Forge signal readiness in logs/latest.log, not on stdout.
+
+    Scoring the run from the pipe alone marked both healthy loaders as broken
+    while their own logs plainly said Done (...).
+    """
+
+    def test_marker_written_only_to_file_is_still_pass(self):
+        tmp = Path(tempfile.mkdtemp())
+        logs = tmp / "logs"
+        logs.mkdir()
+        script = tmp / "srv.py"
+        script.write_text(
+            "import pathlib, time\n"
+            "p = pathlib.Path('logs/latest.log')\n"
+            "p.write_text('starting\\n', encoding='utf-8')\n"
+            "time.sleep(1)\n"
+            "with p.open('a', encoding='utf-8') as fh:\n"
+            "    fh.write('Done (9.9s)! For help, type \\\"help\\\"\\n')\n"
+            "time.sleep(120)\n",
+            encoding="utf-8",
+        )
+        import sys as _sys
+        out, _code = launcher.boot([_sys.executable, str(script)],
+                                   tmp / "boot.log", timeout=60,
+                                   stop_marker="Done (", cwd=tmp)
+        outcome, why = launcher.classify(out, None)
+        self.assertEqual(outcome, launcher.Outcome.PASS,
+                         f"expected pass, got {outcome.value}: {why}")
+
+    def test_file_log_is_appended_to_returned_output(self):
+        tmp = Path(tempfile.mkdtemp())
+        logs = tmp / "logs"
+        logs.mkdir()
+        (logs / "latest.log").write_text(
+            'Done (3.3s)! For help, type "help"\n', encoding="utf-8")
+        tail = launcher._LogTail(tmp)
+        self.assertTrue(tail.contains("Done ("))
+        self.assertIn("Done (3.3s)!", tail.text)
+
+    def test_tail_reads_new_content_each_call(self):
+        tmp = Path(tempfile.mkdtemp())
+        logs = tmp / "logs"
+        logs.mkdir()
+        target = logs / "latest.log"
+        target.write_text("alpha\n", encoding="utf-8")
+        tail = launcher._LogTail(tmp)
+        # The first poll must see what is already there: on a retry the marker
+        # may predate our first look.
+        self.assertTrue(tail.contains("alpha"))
+        with target.open("a", encoding="utf-8") as fh:
+            fh.write("beta\n")
+        self.assertTrue(tail.contains("beta"))
+        # Incremental: the second poll appended only the new line, so "alpha"
+        # must appear exactly once rather than being re-read. (Line endings
+        # differ per platform, so compare content rather than exact bytes.)
+        self.assertEqual(tail.text.count("alpha"), 1)
+        self.assertEqual(tail.text.count("beta"), 1)
+        self.assertLess(tail.text.index("alpha"), tail.text.index("beta"))
+
+    def test_rotation_resets_offset(self):
+        tmp = Path(tempfile.mkdtemp())
+        logs = tmp / "logs"
+        logs.mkdir()
+        target = logs / "latest.log"
+        target.write_text("x" * 500, encoding="utf-8")
+        tail = launcher._LogTail(tmp)
+        tail.contains("x")
+        target.write_text("fresh start\n", encoding="utf-8")
+        self.assertTrue(tail.contains("fresh start"))
+
+    def test_missing_log_dir_is_not_an_error(self):
+        tmp = Path(tempfile.mkdtemp())
+        tail = launcher._LogTail(tmp)
+        self.assertFalse(tail.contains("anything"))
+
+
 class ArgsFileSelectionTests(unittest.TestCase):
     """The installer writes both args files everywhere; pick by platform.
 
