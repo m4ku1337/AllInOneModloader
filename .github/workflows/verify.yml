@@ -7,6 +7,22 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Unit tests first: they are fast, hermetic, and catch the class of bug this
+  # project hit repeatedly -- unbounded waits that only show up as a CI hang.
+  tests:
+    name: unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -t . -v
+
   # Confirms every loader can install and boot Minecraft 26.2 on a clean
   # runner. This is the gate that catches loader or Mojang metadata changes
   # before they reach a benchmark run.
@@ -40,6 +56,9 @@ jobs:
         env:
           AIOM_PROBE_TIMEOUT: '300'
           AIOM_INSTALL_TIMEOUT: '600'
+          AIOM_PREFETCH_TIMEOUT: '240'
+          AIOM_PREFETCH_URL_TIMEOUT: '60'
+          AIOM_PAPER_DOWNLOAD_TIMEOUT: '300'
         run: python -m aiom.core.launcher ${{ matrix.loader }}
 
       - name: Upload boot log

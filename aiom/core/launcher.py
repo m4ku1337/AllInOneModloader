@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -370,32 +371,65 @@ def _installer_done(instance: Path) -> bool:
         any(instance.glob("libraries/**/unix_args.txt"))
 
 
-def _prefetch(instance: Path, url_blob: str) -> int:
+def _prefetch(instance: Path, url_blob: str, budget: int | None = None) -> int:
     """Mirror the given jar URLs into libraries/ using curl.
 
     The installers' own HTTP clients are unreliable behind restrictive proxies,
     but curl succeeds, so we satisfy their dependency list out-of-band and let
     the installer run fully offline on the retry.
+
+    Downloads run concurrently and the whole pass is capped by `budget`
+    seconds. The serial version took up to 120s per URL, so a dependency list
+    of a few hundred jars could burn hours -- unbounded work inside a job that
+    has to answer "did this loader still boot?" in minutes.
     """
     urls = {u for u in re.findall(r"https?://[^\s,\"]+\.jar", url_blob) if u}
     if not urls or shutil.which("curl") is None:
         return 0
-    n = 0
-    for u in urls:
-        rel = _maven_relpath(u)
+
+    per_url = _env_int("AIOM_PREFETCH_URL_TIMEOUT", 120)
+    total = budget if budget is not None else _env_int("AIOM_PREFETCH_TIMEOUT", 900)
+    # A curl that overruns the pass budget would defeat the cap, so clamp it.
+    deadline = time.time() + total
+
+    def one(url: str) -> bool:
+        rel = _maven_relpath(url)
         if not rel:
-            continue
+            return False
         dest = instance / "libraries" / rel
         if dest.exists() and dest.stat().st_size > 0:
-            continue
+            return False
+        left = int(deadline - time.time())
+        if left <= 0:
+            return False
         dest.parent.mkdir(parents=True, exist_ok=True)
-        r = subprocess.run(["curl", "-sSL", "--fail", "--max-time", "120",
-                            "-o", str(dest), u], capture_output=True)
+        r = subprocess.run(
+            ["curl", "-sSL", "--fail", "--max-time", str(min(per_url, left)),
+             "-o", str(dest), url], capture_output=True)
         if r.returncode != 0:
             dest.unlink(missing_ok=True)
-        else:
-            n += 1
-    return n
+            return False
+        return True
+
+    pool = ThreadPoolExecutor(max_workers=8)
+    try:
+        futures = {pool.submit(one, u) for u in urls}
+        # Bounded wait: a plain `with` block would join every worker and could
+        # overrun the budget on stragglers. Whatever is missing afterwards is
+        # picked up by the installer's own download pass.
+        wait(futures, timeout=max(0.0, deadline - time.time()))
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+    got = 0
+    for f in futures:
+        if not f.done():
+            continue
+        try:
+            got += 1 if f.result() else 0
+        except Exception:
+            continue
+    return got
 
 
 def _maven_relpath(url: str) -> str | None:
@@ -473,7 +507,8 @@ def prepare_paper(instance: Path, mc: str = mcmeta.TARGET_MC) -> tuple[list[str]
     instance.mkdir(parents=True, exist_ok=True)
     (instance / "eula.txt").write_text("eula=true\n", encoding="utf-8")
     url, build = resolve_paper(mc)
-    jar = fetch_file(url, instance / "paper.jar", timeout=600)
+    jar = fetch_file(url, instance / "paper.jar",
+                     timeout=_env_int("AIOM_PAPER_DOWNLOAD_TIMEOUT", 600))
     return ["-jar", str(jar.resolve()), "nogui"], f"paper {mc} build {build}"
 
 
