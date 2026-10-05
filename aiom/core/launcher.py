@@ -15,7 +15,10 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -96,37 +99,177 @@ def boot(cmd: list[str], log: Path, timeout: int,
     Returns (output, exit_code). A server that reaches readiness is stopped on
     purpose, so a non-zero exit afterwards is expected and never a failure on
     its own; readiness is decided from the log text instead.
+
+    The reader is a background thread rather than `for line in proc.stdout`.
+    A blocking read on the pipe never returns once the server goes quiet, and
+    since the deadline is only checked *after* a line arrives, a server that
+    prints its readiness marker and then stops talking -- which is exactly what
+    Paper does -- hangs the run forever instead of timing out. The thread makes
+    the timeout reachable: the main loop always wakes, whether or not output
+    arrives.
     """
     log.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.Popen(
         cmd, cwd=str(Path(cwd).resolve()), stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, text=True, encoding="utf-8",
         errors="replace", bufsize=1,
+        # Its own session/process group on POSIX, so stopping the server tree
+        # cannot signal this process. See _stop_tree.
+        start_new_session=(os.name != "nt"),
     )
     chunks: list[str] = []
-    deadline = time.time() + timeout
-    ready = False
-    assert proc.stdout is not None
-    try:
+
+    # Latching the marker as it streams past. Re-scanning a sliding window of
+    # the last N lines looks equivalent but is not: Paper emits thousands of
+    # lines before `Done (`, so by the time the poll loop notices, the marker
+    # has scrolled out of any fixed window and the boot is scored a failure
+    # despite the server having started cleanly.
+    seen_marker = threading.Event()
+
+    def pump() -> None:
+        assert proc.stdout is not None
         for line in proc.stdout:
             chunks.append(line)
             if stop_marker and stop_marker in line:
-                ready = True
-                # Give the server a moment to finish flushing, then stop it.
-                deadline = min(deadline, time.time() + 20)
-            if time.time() > deadline:
+                seen_marker.set()
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
+
+    deadline = time.time() + timeout
+    stop_at: float | None = None
+    # Paper and Forge do not report readiness on stdout: they log to
+    # logs/latest.log inside the instance and leave the pipe nearly empty. The
+    # server reached `Done (...)` and kept running happily either way, so
+    # scoring the run from the pipe alone marked two healthy loaders as broken.
+    # Watch the file too, tailing only what is new so the cost stays flat.
+    watched = _LogTail(cwd)
+    try:
+        while True:
+            if stop_marker and stop_at is None:
+                if seen_marker.is_set() or watched.contains(stop_marker):
+                    # Give the server a moment to finish flushing, then stop it.
+                    stop_at = time.time() + 20
+            now = time.time()
+            if stop_at is not None and now >= stop_at:
                 break
+            if now >= deadline:
+                break
+            if proc.poll() is not None and not reader.is_alive():
+                break
+            time.sleep(0.25)
     finally:
         if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=25)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=10)
+            _stop_tree(proc, cwd)
+        reader.join(timeout=5)
     out = "".join(chunks)
+    if watched.text:
+        out += "\n--- server log ---\n" + watched.text
     log.write_text(out, encoding="utf-8")
     return out, proc.returncode
+
+
+class _LogTail:
+    """Incremental reader for the log file a server writes beside the pipe."""
+
+    _NAMES = ("latest.log", "debug.log")
+
+    def __init__(self, cwd: Path) -> None:
+        self._cwd = Path(cwd)
+        self._pos: dict[Path, int] = {}
+        self.text = ""
+
+    def _files(self) -> list[Path]:
+        base = self._cwd / "logs"
+        if not base.is_dir():
+            return []
+        return [base / n for n in self._NAMES if (base / n).is_file()]
+
+    def _pump(self) -> str:
+        found = []
+        for path in self._files():
+            start = self._pos.get(path, 0)
+            try:
+                size = path.stat().st_size
+                if size < start:  # rotated or truncated
+                    start = 0
+                if size == start:
+                    continue
+                with path.open("r", encoding="utf-8", errors="replace") as fh:
+                    fh.seek(start)
+                    blob = fh.read()
+                self._pos[path] = start + len(blob)
+                found.append(blob)
+            except OSError:
+                continue
+        return "".join(found)
+
+    def contains(self, needle: str) -> bool:
+        self.text += self._pump()
+        return needle in self.text
+
+
+def _stop_tree(proc: subprocess.Popen, cwd: Path) -> None:
+    """Terminate the server and every JVM it spawned.
+
+    Plain `terminate()` is not enough here. Paper starts through paperclip,
+    which unpacks and then launches the real server as a *child* JVM; killing
+    the parent leaves that child holding `paper.jar`, `libraries/` and the world
+    lock. The next run then fails with "Device or resource busy" while deleting,
+    or `DirectoryLock.create` while booting, and neither error points at a
+    surviving process.
+
+    `taskkill /T` is tried first while we still know the pid, then a
+    command-line sweep runs unconditionally: by the time the parent has exited,
+    its pid no longer identifies the tree, so the only reliable handle left is
+    the instance path baked into the child's command line.
+    """
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                       capture_output=True, check=False)
+    else:
+        # Kill only our own child, never a process group. The child inherits
+        # this process's group unless we put it in a new one, so `killpg` on
+        # its group id also signals us -- the run then dies right here,
+        # silently, before it can write the verdict for the server that was
+        # starting up fine. `Popen(start_new_session=True)` (see boot()) gives
+        # the child its own group, making killpg correct again.
+        try:
+            import signal
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            proc.kill()
+    try:
+        proc.wait(timeout=25)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+    kill_stray_servers(str(Path(cwd).resolve()))
+
+
+def kill_stray_servers(instance_hint: str = "") -> int:
+    """Terminate leftover Minecraft server JVMs belonging to this workspace.
+
+    A run that was interrupted, or whose parent exited before its children, can
+    leave a server holding the world lock. Every later boot would then fail for
+    a reason unrelated to the mods under test. Only JVMs whose command line
+    points inside this workspace are touched, so unrelated Java work is safe.
+
+    Implementation notes live in `winproc`; the short version is that no
+    external tool is used, because every shell-based option failed silently
+    (`wmic` is gone; `taskkill /T` needs a parent that has already exited).
+    """
+    if os.name != "nt":
+        return 0
+    marker = instance_hint or str(Path(__file__).resolve().parents[2])
+    try:
+        from . import winproc
+        return len(winproc.kill_servers_under(marker))
+    except (ImportError, OSError):
+        return 0
 
 
 def _has_ready(text: str) -> bool:
@@ -143,17 +286,64 @@ def prepare_fabric(instance: Path, mc: str = mcmeta.TARGET_MC) -> tuple[list[str
     (instance / "eula.txt").write_text("eula=true\n", encoding="utf-8")
     installer = fetch_file(FABRIC_INSTALLER, CACHE / "fabric-installer-1.1.2.jar")
     java_home, _ = javart.resolve(mcmeta.java_major(mc))
-    subprocess.run(
+    budget = _env_int("AIOM_FABRIC_INSTALL_TIMEOUT", 900)
+    _say(f"fabric: running installer (budget {budget}s)")
+    proc = subprocess.run(
         [_java_cmd(java_home), "-jar", str(installer), "server",
          "-mcversion", mc, "-loader", fabric.latest_loader(),
          "-dir", str(instance.resolve())],
         capture_output=True, text=True, cwd=str(instance.resolve()),
-        encoding="utf-8", errors="replace", timeout=900,
+        encoding="utf-8", errors="replace", timeout=budget,
     )
     launcher = instance / "fabric-server-launch.jar"
     if not launcher.exists():
-        raise RuntimeError("fabric installer produced no launcher jar")
+        blob = (proc.stdout or "") + (proc.stderr or "")
+        tail = "\n".join(blob.splitlines()[-12:])
+        raise RuntimeError(
+            f"fabric installer produced no launcher jar (exit {proc.returncode})"
+            + (f"; last output:\n{tail}" if tail else ""))
+    _ensure_server_jar(instance, mc)
     return ["-jar", str(launcher.resolve()), "nogui"], f"fabric {fabric.latest_loader()}"
+
+
+def _ensure_server_jar(instance: Path, mc: str = mcmeta.TARGET_MC) -> None:
+    """Fetch the vanilla server jar when the loader did not.
+
+    Fabric's server launcher refuses to start without `server.jar` sitting in
+    the instance directory ("Missing game jar at ..."), and its installer only
+    downloads that jar opportunistically -- on a runner whose network stalls
+    the installer it silently does not, leaving a profile that cannot launch.
+    Downloading it here makes the failure impossible rather than merely likely.
+    """
+    dest = instance / "server.jar"
+    if dest.exists() and dest.stat().st_size > 1024:
+        return
+    _say(f"fabric: fetching vanilla server jar for {mc}")
+    mcmeta.server_jar(mc, dest)
+    _say(f"fabric: server.jar ready ({dest.stat().st_size // 1024} KiB)")
+
+
+def _pick_args(base: Path, loader: str, ver: str, instance: Path) -> Path:
+    """Choose the launcher's args file for the platform we are running on.
+
+    The installer writes *both* `win_args.txt` and `unix_args.txt` on every
+    platform, so preferring win first made every Linux CI run boot the Windows
+    command line and die with "Could not find or load main class" -- reported as
+    a loader failure when the loader was in fact fine. Pick by platform.
+    """
+    order = (["unix_args.txt", "win_args.txt"] if os.name != "nt"
+             else ["win_args.txt", "unix_args.txt"])
+    for name in order:
+        candidate = base / name
+        if candidate.exists():
+            return candidate
+    logs = sorted(p.name for p in instance.glob("*.log"))
+    raise RuntimeError(
+        f"{loader} {ver} install incomplete: neither unix_args.txt nor "
+        f"win_args.txt exists under {base}. The installer's own downloads are "
+        f"likely blocked on this network; check "
+        f"{', '.join(logs) if logs else 'the instance directory'} "
+        f"for the last coordinate it failed to fetch.")
 
 
 def prepare_neoforge(instance: Path, mc: str = mcmeta.TARGET_MC) -> tuple[list[str], str]:
@@ -175,11 +365,8 @@ def prepare_neoforge(instance: Path, mc: str = mcmeta.TARGET_MC) -> tuple[list[s
     java_home, _ = javart.resolve(mcmeta.java_major(mc))
     _run_installer(instance, installer)
 
-    args = instance / "libraries" / "net" / "neoforged" / "neoforge" / ver / "win_args.txt"
-    if not args.exists():
-        args = instance / "libraries" / "net" / "neoforged" / "neoforge" / ver / "unix_args.txt"
-    if not args.exists():
-        raise RuntimeError(f"NeoForge {ver} install incomplete")
+    args = _pick_args(instance / "libraries" / "net" / "neoforged" / "neoforge" / ver,
+                  "NeoForge", ver, instance)
     return ([f"@{instance.resolve() / 'user_jvm_args.txt'}", f"@{args.resolve()}", "nogui"],
             f"neoforge {ver}")
 
@@ -190,51 +377,206 @@ def _coords_to_urls(blob: str) -> set[str]:
     The installer prints one `group:artifact:version[:classifier]` per line
     before it starts downloading. Its own HTTP client is unreliable in
     sandboxed environments, so we resolve those coordinates ourselves via curl.
+
+    Coordinates are *searched for* rather than matched against the whole line.
+    The installer labels them as `Considering library net.fabricmc:...`, and an
+    anchored `fullmatch` rejected all 55 such lines in a NeoForge 26.2 run --
+    the harvest came back nearly empty and the install stalled on a jar we had
+    never been shown the coordinates for. The token itself is still validated,
+    so surrounding prose cannot be mistaken for a coordinate.
     """
     urls: set[str] = set()
-    for line in blob.splitlines():
-        line = line.strip()
-        if not re.fullmatch(r"[A-Za-z0-9_.\-]+:[A-Za-z0-9_.\-]+:[A-Za-z0-9_.\-]+(:[A-Za-z0-9_.\-]+)?", line):
-            continue
-        parts = line.split(":")
-        group, artifact, version = parts[0], parts[1], parts[2]
+    # "+" is legal inside a maven version (sponge-mixin 0.17.3+mixin.0.8.7).
+    # Leaving it out of the character class silently dropped every such
+    # coordinate, and the negative lookahead then had to guard the "..." that
+    # the version itself contains.
+    seg = r"[A-Za-z0-9_.+\-]+"
+    pattern = re.compile(
+        rf"({seg}):({seg}):({seg})(?::({seg}))?(?![\w.+\-])")
+    for group, artifact, version, classifier in pattern.findall(blob):
         ext = "jar"
-        if len(parts) > 3:
-            continue  # classified artifacts are not required for the server
-        path = f"{group.replace('.', '/')}/{artifact}/{version}/{artifact}-{version}.{ext}"
+        suffix = ""
+        if classifier:
+            # Classified artifacts used to be skipped on the assumption that a
+            # server never needs one. NeoForge 26.2 disproves that: it fails
+            # with "These libraries failed to download" for
+            # net.neoforged:mergetool:2.0.7:api and friends, and the failure
+            # names coordinates rather than URLs -- so skipping them here left
+            # the prefetcher with nothing to fetch and the install never
+            # completed. Maven spells the `:api` classifier as an `-api` suffix.
+            if classifier in {"api", "dev", "sources", "javadoc"}:
+                suffix = f"-{classifier}"
+            else:
+                continue
+        path = (f"{group.replace('.', '/')}/{artifact}/{version}/"
+                f"{artifact}-{version}{suffix}.{ext}")
         urls.add(f"https://maven.neoforged.net/releases/{path}")
         urls.add(f"https://libraries.minecraft.net/{path}")
         urls.add(f"https://maven.minecraftforge.net/{path}")
     return urls
 
 
-def _run_installer(instance: Path, installer: Path, attempts: int = 3) -> str:
-    """Run an installer, prefetching the libraries it could not download.
+_PHASE_LOG: Path | None = None
 
-    Returns the combined log blob. Retries because the first pass usually
-    fails on blocked network while populating installer.log; after a prefetch
-    the second pass has everything it needs locally.
+
+def _phase_file(instance: Path) -> Path:
+    """Where phase lines are mirrored for CI artifacts.
+
+    A job killed at its timeout loses its console log, so a stall would leave
+    no trace of which phase it stalled in. This file is uploaded with
+    `if: always()` and survives that.
+    """
+    global _PHASE_LOG
+    log = instance / "logs" / "phases.log"
+    _PHASE_LOG = log
+    return log
+
+
+def _say(msg: str) -> None:
+    """Progress line for CI logs.
+
+    Without these, a job that stalls just sits there: the only visible state is
+    the step name, which is the same whether we are resolving a JDK, running an
+    installer, or waiting on a download. Each wait has its own budget now, so
+    naming the phase tells you which one to look at.
+    """
+    line = f"[aiom] {msg}"
+    print(line, file=sys.stderr, flush=True)
+    if _PHASE_LOG is not None:
+        try:
+            _PHASE_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with _PHASE_LOG.open("a", encoding="utf-8") as fh:
+                fh.write(f"{time.strftime('%H:%M:%S')} {line}\n")
+        except OSError:
+            pass  # Diagnostics must never be the reason a run fails.
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read a positive integer from the environment, ignoring junk values."""
+    try:
+        v = int(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
+    return v if v > 0 else default
+
+
+# Installer budgets, in seconds. The probe pass only needs long enough to make
+# the installer print its dependency coordinates before it starts downloading;
+# the real pass then runs almost entirely offline against what we prefetched.
+#
+# These were 1800x3 (a 90-minute worst case) with no way to shorten them, which
+# is fine on a developer machine but guarantees a CI timeout on any runner whose
+# network stalls the installer -- the job dies before the first attempt returns.
+PROBE_TIMEOUT = _env_int("AIOM_PROBE_TIMEOUT", 420)
+INSTALL_TIMEOUT = _env_int("AIOM_INSTALL_TIMEOUT", 1500)
+
+
+def _run_installer_once(instance: Path, jar: str, timeout: int) -> str:
+    """Run one installer pass, returning its combined output.
+
+    A timeout is treated as "the installer printed what it knew and then
+    stalled", not as an error: the partial blob still carries the coordinates
+    we need to prefetch, so the caller can retry offline.
     """
     java_home, _ = javart.resolve(mcmeta.java_major(mcmeta.TARGET_MC))
-    # cwd is the instance, so every path handed to the JVM must be absolute or
-    # the installer jar itself becomes unresolvable.
-    jar = str(installer.resolve())
-    blob = ""
-    for attempt in range(attempts):
+    try:
         proc = subprocess.run(
             [_java_cmd(java_home), "-jar", jar, "--installServer"],
             capture_output=True, text=True, cwd=str(instance.resolve()),
-            encoding="utf-8", errors="replace", timeout=1800,
+            encoding="utf-8", errors="replace", timeout=timeout,
         )
         blob = (proc.stdout or "") + (proc.stderr or "")
-        log = instance / "installer.log"
-        if log.exists():
-            blob += log.read_text(encoding="utf-8", errors="replace")
-        urls = set(re.findall(r"https?://[^\s,\"]+\.jar", blob))
-        urls |= _coords_to_urls(blob)
-        _prefetch(instance, " ".join(urls))
+    except subprocess.TimeoutExpired as exc:
+        blob = ((exc.stdout or b"").decode("utf-8", "replace") if isinstance(
+            exc.stdout, bytes) else (exc.stdout or ""))
+        blob += "\n[aiom] installer exceeded its %ds budget; treating as partial\n" % timeout
+    # Each installer names its own log after its jar, and that log is where the
+    # full coordinate list lives. Reading a hardcoded `installer.log` found
+    # nothing for NeoForge (which writes `nf-installer.jar.log`), so the
+    # harvest silently ran on stdout alone and missed the labelled
+    # `Considering library ...` lines that carry most coordinates.
+    blob += _installer_logs_blob(instance)
+    return blob
+
+
+def _installer_logs_blob(instance: Path) -> str:
+    """Concatenate every non-empty installer log in the instance directory.
+
+    Each toolchain names its log after its own jar (`nf-installer.jar.log`,
+    `forge-installer.log`), so no single hardcoded name is ever right.
+    """
+    parts: list[str] = []
+    for log in sorted(instance.glob("*.log")):
+        try:
+            if log.stat().st_size:
+                parts.append(log.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    return "\n".join(parts)
+
+
+def _run_installer(instance: Path, installer: Path, attempts: int = 2) -> str:
+    """Run an installer, prefetching the libraries it could not download.
+
+    Returns the combined log blob. Structure is probe -> prefetch -> install:
+
+    The installer prints one `group:artifact:version` per line before it starts
+    downloading. Its own HTTP client is unreliable behind restrictive proxies,
+    so the probe pass exists purely to harvest those coordinates (under a short
+    timeout, since it is expected to stall), and the install pass then runs
+    against jars we mirrored ourselves via curl.
+    """
+    # cwd is the instance, so every path handed to the JVM must be absolute or
+    # the installer jar itself becomes unresolvable.
+    jar = str(installer.resolve())
+
+    # Accumulate coordinates across passes. The installer reports only the
+    # batch it happened to fail on, and each run reveals a different batch, so
+    # a pass that kept only its own coordinates would keep re-discovering the
+    # same jars from scratch and never converge.
+    seen: set[str] = set()
+
+    def harvest(blob: str) -> set[str]:
+        found = set(re.findall(r"https?://[^\s,\"]+\.jar", blob))
+        found |= _coords_to_urls(blob)
+        # `nonlocal` is required: assigning into `seen` from inside this
+        # closure would otherwise make Python treat it as a local and blow up
+        # with UnboundLocalError on the first call.
+        nonlocal seen
+        seen |= found
+        return found
+
+    _say(f"installer probe pass (budget {PROBE_TIMEOUT}s)")
+    blob = _run_installer_once(instance, jar, PROBE_TIMEOUT)
+    urls = harvest(blob)
+    _say(f"probe done: {len(urls)} candidate jars; prefetching")
+    fetched = _prefetch(instance, " ".join(urls))
+    _say(f"prefetch mirrored {fetched} jars")
+    if _installer_done(instance):
+        return blob
+
+    for i in range(max(1, attempts - 1)):
+        _say(f"installer install pass {i + 1}/{max(1, attempts - 1)} "
+             f"(budget {INSTALL_TIMEOUT}s)")
+        blob = _run_installer_once(instance, jar, INSTALL_TIMEOUT)
+        # Re-mirror everything known so far, not just this pass's findings.
+        fetched += _prefetch(instance, " ".join(harvest(blob)))
+        _say(f"prefetch mirrored {fetched} jars in total")
         if _installer_done(instance):
             return blob
+
+    # Final sweep. Each pass only reveals the *next* batch of coordinates once
+    # the previous batch is satisfied, so stopping the loop the moment the
+    # budget runs out leaves the last reported failures unfetched -- which is
+    # exactly what happened: the run ended reporting two missing jars that we
+    # had never been given a chance to mirror. The installer is cheap to re-run
+    # against a complete local library set.
+    _say("installer still incomplete; final prefetch sweep")
+    blob = _run_installer_once(instance, jar, INSTALL_TIMEOUT)
+    fetched += _prefetch(instance, " ".join(harvest(blob)))
+    if _installer_done(instance):
+        return blob
+    _say(f"prefetch mirrored {fetched} jars in total; still no args file")
     return blob
 
 
@@ -244,32 +586,76 @@ def _installer_done(instance: Path) -> bool:
         any(instance.glob("libraries/**/unix_args.txt"))
 
 
-def _prefetch(instance: Path, url_blob: str) -> int:
+def _prefetch(instance: Path, url_blob: str, budget: int | None = None) -> int:
     """Mirror the given jar URLs into libraries/ using curl.
 
     The installers' own HTTP clients are unreliable behind restrictive proxies,
     but curl succeeds, so we satisfy their dependency list out-of-band and let
     the installer run fully offline on the retry.
+
+    Downloads run concurrently and the whole pass is capped by `budget`
+    seconds. The serial version took up to 120s per URL, so a dependency list
+    of a few hundred jars could burn hours -- unbounded work inside a job that
+    has to answer "did this loader still boot?" in minutes.
     """
     urls = {u for u in re.findall(r"https?://[^\s,\"]+\.jar", url_blob) if u}
     if not urls or shutil.which("curl") is None:
         return 0
-    n = 0
-    for u in urls:
-        rel = _maven_relpath(u)
+
+    per_url = _env_int("AIOM_PREFETCH_URL_TIMEOUT", 120)
+    total = budget if budget is not None else _env_int("AIOM_PREFETCH_TIMEOUT", 900)
+    # A curl that overruns the pass budget would defeat the cap, so clamp it.
+    deadline = time.time() + total
+
+    def one(url: str) -> bool:
+        rel = _maven_relpath(url)
         if not rel:
-            continue
+            return False
         dest = instance / "libraries" / rel
         if dest.exists() and dest.stat().st_size > 0:
-            continue
+            return False
+        left = int(deadline - time.time())
+        if left <= 0:
+            return False
         dest.parent.mkdir(parents=True, exist_ok=True)
-        r = subprocess.run(["curl", "-sSL", "--fail", "--max-time", "120",
-                            "-o", str(dest), u], capture_output=True)
-        if r.returncode != 0:
+        # Retry a few times. A single reset was enough to make the installer
+        # declare a jar permanently unfetchable: the prefetch gave up, the
+        # installer's own client got blocked the same way, and the install
+        # failed on a coordinate curl fetches fine on the next attempt. The
+        # same URL returned 200, 200, 200 seconds after one reset.
+        attempts = max(1, _env_int("AIOM_PREFETCH_ATTEMPTS", 3))
+        for _ in range(attempts):
+            left = int(deadline - time.time())
+            if left <= 0:
+                break
+            r = subprocess.run(
+                ["curl", "-sSL", "--fail", "--max-time",
+                 str(min(per_url, left)), "-o", str(dest), url],
+                capture_output=True)
+            if r.returncode == 0:
+                return True
             dest.unlink(missing_ok=True)
-        else:
-            n += 1
-    return n
+        return False
+
+    pool = ThreadPoolExecutor(max_workers=8)
+    try:
+        futures = {pool.submit(one, u) for u in urls}
+        # Bounded wait: a plain `with` block would join every worker and could
+        # overrun the budget on stragglers. Whatever is missing afterwards is
+        # picked up by the installer's own download pass.
+        wait(futures, timeout=max(0.0, deadline - time.time()))
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+    got = 0
+    for f in futures:
+        if not f.done():
+            continue
+        try:
+            got += 1 if f.result() else 0
+        except Exception:
+            continue
+    return got
 
 
 def _maven_relpath(url: str) -> str | None:
@@ -327,11 +713,7 @@ def prepare_forge(instance: Path, mc: str = mcmeta.TARGET_MC) -> tuple[list[str]
     _run_installer(instance, installer)
 
     base = instance / "libraries" / "net" / "minecraftforge" / "forge" / ver
-    args = base / "win_args.txt"
-    if not args.exists():
-        args = base / "unix_args.txt"
-    if not args.exists():
-        raise RuntimeError(f"Forge {ver} install incomplete")
+    args = _pick_args(base, "Forge", ver, instance)
     return ([f"@{instance.resolve() / 'user_jvm_args.txt'}", f"@{args.resolve()}", "nogui"],
             f"forge {ver}")
 
@@ -343,7 +725,10 @@ def prepare_paper(instance: Path, mc: str = mcmeta.TARGET_MC) -> tuple[list[str]
     instance.mkdir(parents=True, exist_ok=True)
     (instance / "eula.txt").write_text("eula=true\n", encoding="utf-8")
     url, build = resolve_paper(mc)
-    jar = fetch_file(url, instance / "paper.jar", timeout=600)
+    budget = _env_int("AIOM_PAPER_DOWNLOAD_TIMEOUT", 600)
+    _say(f"paper: downloading build {build} (budget {budget}s)")
+    jar = fetch_file(url, instance / "paper.jar", timeout=budget)
+    _say(f"paper: {jar.name} ready ({jar.stat().st_size // 1024} KiB)")
     return ["-jar", str(jar.resolve()), "nogui"], f"paper {mc} build {build}"
 
 
@@ -353,7 +738,9 @@ def launch(loader: str, instance: Path, timeout: int = 210,
     """Install + boot `loader` in `instance` and classify the result."""
     instance.mkdir(parents=True, exist_ok=True)
     log = instance / "logs" / f"{loader}-boot.log"
+    _phase_file(instance)
     started = time.time()
+    _say(f"{loader}: preparing instance at {instance}")
     try:
         if loader == "fabric":
             args, detail = prepare_fabric(instance, mc)
@@ -366,14 +753,36 @@ def launch(loader: str, instance: Path, timeout: int = 210,
         else:
             raise ValueError(f"unsupported loader {loader}")
     except Exception as exc:
+        _say(f"{loader}: PREPARE FAILED after {time.time() - started:.0f}s: "
+             f"{type(exc).__name__}: {exc}")
         return LaunchResult(Outcome.FAIL_PREPARE, time.time() - started, None,
                             log, detail=f"{type(exc).__name__}: {exc}"[:300])
+    _say(f"{loader}: installed ({time.time() - started:.0f}s); booting "
+         f"with a {timeout}s readiness budget")
 
-    java_home, major = javart.resolve(mcmeta.java_major(mc))
-    cmd = [_java_cmd(java_home), "-Xmx3G", *(extra_jvm or []), *args]
-    # "Done (" is emitted only after full initialisation on every loader.
-    out, code = boot(cmd, log, timeout, instance, stop_marker="Done (")
+    # A crash in boot() must not read as "server never became ready" -- that
+    # sends whoever reads the report after the loader rather than after us.
+    try:
+        java_home, major = javart.resolve(mcmeta.java_major(mc))
+        cmd = [_java_cmd(java_home), "-Xmx3G", *(extra_jvm or []), *args]
+        # "Done (" is emitted only after full initialisation on every loader.
+        out, code = boot(cmd, log, timeout, instance, stop_marker="Done (")
+    except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        _say(f"{loader}: BOOT CRASHED after {time.time() - started:.0f}s: "
+             f"{type(exc).__name__}: {exc}")
+        for line in tb.splitlines()[-12:]:
+            _say(f"    {line}")
+        try:
+            log.write_text(tb, encoding="utf-8")
+        except OSError:
+            pass
+        return LaunchResult(Outcome.FAIL_ENV, time.time() - started, None, log,
+                            detail=f"boot crashed: {type(exc).__name__}: {exc}"[:300])
     outcome, why = classify(out, code)
+    _say(f"{loader}: {outcome.value} after {time.time() - started:.0f}s "
+         f"({why})")
     return LaunchResult(outcome, time.time() - started, code, log,
                         detail=f"{detail}; {why}; java {major}",
                         log_tail=tail(out))

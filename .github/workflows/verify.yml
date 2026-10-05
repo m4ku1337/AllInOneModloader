@@ -7,12 +7,32 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Unit tests first: they are fast, hermetic, and catch the class of bug this
+  # project hit repeatedly -- unbounded waits that only show up as a CI hang.
+  tests:
+    name: unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -t . -v
+
   # Confirms every loader can install and boot Minecraft 26.2 on a clean
   # runner. This is the gate that catches loader or Mojang metadata changes
   # before they reach a benchmark run.
   loaders:
     name: ${{ matrix.loader }} 26.2
     runs-on: ubuntu-latest
+    # Locally these finish in seconds (paper 4s, forge 30s). Generous budgets
+    # still sum to ~20 min, so a genuine stall surfaces here rather than
+    # defaulting to the 6-hour job limit with no log to explain it.
+    timeout-minutes: 14
     strategy:
       fail-fast: false
       matrix:
@@ -30,14 +50,44 @@ jobs:
           python-version: '3.12'
 
       - name: Verify loader boots 26.2
-        run: python -m aiom.core.launcher ${{ matrix.loader }}
+        # forge/paper installers stall on this network. Keep their budgets well
+        # under the job timeout so a stall surfaces as a failed job with a log
+        # in minutes, not as a 25-minute hang that tells us nothing.
+        env:
+          AIOM_PROBE_TIMEOUT: '300'
+          AIOM_INSTALL_TIMEOUT: '600'
+          AIOM_PREFETCH_TIMEOUT: '240'
+          AIOM_PREFETCH_URL_TIMEOUT: '60'
+          AIOM_PAPER_DOWNLOAD_TIMEOUT: '300'
+        # The budgets above bound individual waits, but nothing bounds their
+        # sum, and a job killed at its limit loses its console log entirely.
+        # The outer `timeout` guarantees the step ends on its own with output
+        # intact, which is what makes a stall diagnosable instead of mute.
+        run: timeout --signal=TERM --kill-after=30 780 python -m aiom.core.launcher ${{ matrix.loader }}
+
+      # Dumping phases here is what makes a stall diagnosable: when the job is
+      # killed at its timeout GitHub discards the console log, so this step
+      # never gets to run and we are left with no evidence at all. Echoing the
+      # file into the surviving part of the log gives us the phase timeline
+      # even when everything after this point was lost.
+      - name: Dump phase timeline
+        if: always()
+        run: |
+          echo "--- phase timeline (${{ matrix.loader }}) ---"
+          cat .aiom/verify/${{ matrix.loader }}/logs/phases.log 2>/dev/null \
+            || echo "(no phases.log: the run died before the first checkpoint)"
 
       - name: Upload boot log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: boot-log-${{ matrix.loader }}
-          path: .aiom/verify/${{ matrix.loader }}/logs/*.log
+          # phases.log is written as the run progresses, so it is the only
+          # evidence of *where* a timeout hit -- GitHub drops the console log
+          # when a job is killed at its limit.
+          path: |
+            .aiom/verify/${{ matrix.loader }}/logs/*.log
+            .aiom/verify/${{ matrix.loader }}/installer.log
           if-no-files-found: ignore
 
   # Small smoke run so the benchmark harness itself is covered on every push.
@@ -45,6 +95,7 @@ jobs:
   bench-smoke:
     name: bench smoke
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 

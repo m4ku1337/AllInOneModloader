@@ -3,8 +3,14 @@
 *.jar
 !tools/**/*.jar
 
-# Generated benchmark reports
-reports/
+# Generated benchmark output. The measured run that backs every number
+# quoted in the README is committed on purpose -- it is a deliverable, not
+# a build artifact. Ad-hoc reruns stay ignored.
+reports/*
+!reports/REPORT-26.2.md
+!reports/mixed-26.2-20262.json
+!reports/eco-26.2-20262.json
+!reports/place-26.2-20262.json
 
 # Python
 __pycache__/

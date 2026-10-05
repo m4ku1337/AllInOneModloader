@@ -1,0 +1,21 @@
+{
+  "mc": "26.2",
+  "seed": 20262,
+  "n": 100,
+  "single_family": 75,
+  "multi_family": 25,
+  "family_hist": {
+    "fabric": 56,
+    "neoforge": 66,
+    "paper": 11,
+    "sponge": 5
+  },
+  "closure_nodes": 129,
+  "closure_edges": 89,
+  "extra_deps_pulled": 29,
+  "unresolved_dep_nodes": 0,
+  "code_nodes": 128,
+  "placeable": 128,
+  "placeable_rate": 1.0,
+  "unplaceable": []
+}
