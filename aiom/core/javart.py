@@ -11,6 +11,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 # Locations checked before falling back to PATH, in priority order.
@@ -23,6 +24,10 @@ _WINDOWS_CANDIDATES = [
 
 _VERSION_RE = re.compile(r'version "(\d+)(?:\.(\d+))?')
 
+# Seconds allowed for `java -version`. Generous for a cold JVM start, far below
+# the point where a stuck probe starts costing whole minutes on a CI runner.
+PROBE_TIMEOUT = max(5, int(os.environ.get("AIOM_JAVA_PROBE_TIMEOUT", "20")))
+
 _VERSION_CACHE: dict[str, int] = {}
 
 
@@ -32,14 +37,26 @@ def _java_bin(home: Path) -> Path:
 
 
 def probe_major(java: Path) -> int | None:
-    """Major version of a java binary, or None if it will not run."""
+    """Major version of a java binary, or None if it will not run.
+
+    The timeout is short on purpose. A JVM that cannot answer `-version` in a
+    few seconds is not one we want to boot a server with, and on a CI runner
+    with several JDKs installed each stalled probe would otherwise cost a full
+    minute before the search moved on.
+    """
     key = str(java)
     if key in _VERSION_CACHE:
         return _VERSION_CACHE[key]
     try:
         out = subprocess.run([str(java), "-version"], capture_output=True,
-                             text=True, timeout=60)
-    except Exception:
+                             text=True, timeout=PROBE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        print(f"[aiom] java probe timed out after {PROBE_TIMEOUT}s: {java}",
+              file=sys.stderr, flush=True)
+        return None
+    except Exception as exc:
+        print(f"[aiom] java probe failed for {java}: {exc}",
+              file=sys.stderr, flush=True)
         return None
     blob = (out.stderr or "") + (out.stdout or "")
     m = _VERSION_RE.search(blob)

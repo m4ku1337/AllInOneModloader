@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -288,6 +289,17 @@ def _coords_to_urls(blob: str) -> set[str]:
     return urls
 
 
+def _say(msg: str) -> None:
+    """Progress line for CI logs.
+
+    Without these, a job that stalls just sits there: the only visible state is
+    the step name, which is the same whether we are resolving a JDK, running an
+    installer, or waiting on a download. Each wait has its own budget now, so
+    naming the phase tells you which one to look at.
+    """
+    print(f"[aiom] {msg}", file=sys.stderr, flush=True)
+
+
 def _env_int(name: str, default: int) -> int:
     """Read a positive integer from the environment, ignoring junk values."""
     try:
@@ -348,20 +360,28 @@ def _run_installer(instance: Path, installer: Path, attempts: int = 2) -> str:
     # the installer jar itself becomes unresolvable.
     jar = str(installer.resolve())
 
+    _say(f"installer probe pass (budget {PROBE_TIMEOUT}s)")
     blob = _run_installer_once(instance, jar, PROBE_TIMEOUT)
     urls = set(re.findall(r"https?://[^\s,\"]+\.jar", blob))
     urls |= _coords_to_urls(blob)
+    _say(f"probe done: {len(urls)} candidate jars; prefetching")
     fetched = _prefetch(instance, " ".join(urls))
+    _say(f"prefetch mirrored {fetched} jars")
     if _installer_done(instance):
         return blob
 
-    for _ in range(max(1, attempts - 1)):
+    for i in range(max(1, attempts - 1)):
+        _say(f"installer install pass {i + 1}/{max(1, attempts - 1)} "
+             f"(budget {INSTALL_TIMEOUT}s)")
         blob = _run_installer_once(instance, jar, INSTALL_TIMEOUT)
         urls = set(re.findall(r"https?://[^\s,\"]+\.jar", blob))
         urls |= _coords_to_urls(blob)
         fetched += _prefetch(instance, " ".join(urls))
+        _say(f"prefetch mirrored {fetched} jars in total")
         if _installer_done(instance):
             break
+    else:
+        _say("installer never produced an args file")
     return blob
 
 
@@ -507,8 +527,10 @@ def prepare_paper(instance: Path, mc: str = mcmeta.TARGET_MC) -> tuple[list[str]
     instance.mkdir(parents=True, exist_ok=True)
     (instance / "eula.txt").write_text("eula=true\n", encoding="utf-8")
     url, build = resolve_paper(mc)
-    jar = fetch_file(url, instance / "paper.jar",
-                     timeout=_env_int("AIOM_PAPER_DOWNLOAD_TIMEOUT", 600))
+    budget = _env_int("AIOM_PAPER_DOWNLOAD_TIMEOUT", 600)
+    _say(f"paper: downloading build {build} (budget {budget}s)")
+    jar = fetch_file(url, instance / "paper.jar", timeout=budget)
+    _say(f"paper: {jar.name} ready ({jar.stat().st_size // 1024} KiB)")
     return ["-jar", str(jar.resolve()), "nogui"], f"paper {mc} build {build}"
 
 
@@ -519,6 +541,7 @@ def launch(loader: str, instance: Path, timeout: int = 210,
     instance.mkdir(parents=True, exist_ok=True)
     log = instance / "logs" / f"{loader}-boot.log"
     started = time.time()
+    _say(f"{loader}: preparing instance at {instance}")
     try:
         if loader == "fabric":
             args, detail = prepare_fabric(instance, mc)
@@ -533,6 +556,8 @@ def launch(loader: str, instance: Path, timeout: int = 210,
     except Exception as exc:
         return LaunchResult(Outcome.FAIL_PREPARE, time.time() - started, None,
                             log, detail=f"{type(exc).__name__}: {exc}"[:300])
+    _say(f"{loader}: installed ({time.time() - started:.0f}s); booting "
+         f"with a {timeout}s readiness budget")
 
     java_home, major = javart.resolve(mcmeta.java_major(mc))
     cmd = [_java_cmd(java_home), "-Xmx3G", *(extra_jvm or []), *args]

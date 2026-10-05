@@ -19,7 +19,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from aiom.core import http, launcher
+from aiom.core import http, javart, launcher
 
 
 class EnvIntTests(unittest.TestCase):
@@ -182,6 +182,36 @@ class HttpFallbackBudgetTests(unittest.TestCase):
             http.fetch_bytes("https://x/y", timeout=60)
         self.assertIsNotNone(run.call_args.kwargs.get("timeout"),
                              "subprocess.run must carry its own timeout")
+
+
+class JavaProbeTests(unittest.TestCase):
+    """A stuck `java -version` must not cost a minute per candidate JDK."""
+
+    def test_probe_timeout_is_short(self):
+        self.assertLessEqual(javart.PROBE_TIMEOUT, 30)
+
+    def test_stalled_probe_returns_none_quickly(self):
+        with mock.patch.object(javart.subprocess, "run",
+                               side_effect=subprocess.TimeoutExpired("java", 1)):
+            started = time.time()
+            self.assertIsNone(javart.probe_major(Path("/j/bin/java")))
+            self.assertLess(time.time() - started, 5)
+
+    def test_failed_probe_is_not_cached_as_success(self):
+        # Only a real answer may be cached; caching a failure would make a
+        # later, working JVM look permanently broken.
+        with mock.patch.object(javart.subprocess, "run",
+                               side_effect=subprocess.TimeoutExpired("java", 1)):
+            javart.probe_major(Path("/j/bin/java"))
+        self.assertNotIn("/j/bin/java", javart._VERSION_CACHE)
+
+    def test_version_is_parsed_and_cached(self):
+        java = Path("/jdk25/bin/java")
+        resp = subprocess.CompletedProcess([], 0, "", 'openjdk version "25" 2024')
+        with mock.patch.object(javart.subprocess, "run", return_value=resp):
+            self.assertEqual(javart.probe_major(java), 25)
+            javart.probe_major(java)
+        self.assertEqual(javart._VERSION_CACHE[str(java)], 25)
 
 
 if __name__ == "__main__":
