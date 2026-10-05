@@ -673,10 +673,26 @@ def launch(loader: str, instance: Path, timeout: int = 210,
     _say(f"{loader}: installed ({time.time() - started:.0f}s); booting "
          f"with a {timeout}s readiness budget")
 
-    java_home, major = javart.resolve(mcmeta.java_major(mc))
-    cmd = [_java_cmd(java_home), "-Xmx3G", *(extra_jvm or []), *args]
-    # "Done (" is emitted only after full initialisation on every loader.
-    out, code = boot(cmd, log, timeout, instance, stop_marker="Done (")
+    # A crash in boot() must not read as "server never became ready" -- that
+    # sends whoever reads the report after the loader rather than after us.
+    try:
+        java_home, major = javart.resolve(mcmeta.java_major(mc))
+        cmd = [_java_cmd(java_home), "-Xmx3G", *(extra_jvm or []), *args]
+        # "Done (" is emitted only after full initialisation on every loader.
+        out, code = boot(cmd, log, timeout, instance, stop_marker="Done (")
+    except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        _say(f"{loader}: BOOT CRASHED after {time.time() - started:.0f}s: "
+             f"{type(exc).__name__}: {exc}")
+        for line in tb.splitlines()[-12:]:
+            _say(f"    {line}")
+        try:
+            log.write_text(tb, encoding="utf-8")
+        except OSError:
+            pass
+        return LaunchResult(Outcome.FAIL_ENV, time.time() - started, None, log,
+                            detail=f"boot crashed: {type(exc).__name__}: {exc}"[:300])
     outcome, why = classify(out, code)
     _say(f"{loader}: {outcome.value} after {time.time() - started:.0f}s "
          f"({why})")
