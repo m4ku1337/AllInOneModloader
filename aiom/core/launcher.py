@@ -337,10 +337,12 @@ def _pick_args(base: Path, loader: str, ver: str, instance: Path) -> Path:
         candidate = base / name
         if candidate.exists():
             return candidate
+    logs = sorted(p.name for p in instance.glob("*.log"))
     raise RuntimeError(
         f"{loader} {ver} install incomplete: neither unix_args.txt nor "
         f"win_args.txt exists under {base}. The installer's own downloads are "
-        f"likely blocked on this network; check {instance / 'installer.log'} "
+        f"likely blocked on this network; check "
+        f"{', '.join(logs) if logs else 'the instance directory'} "
         f"for the last coordinate it failed to fetch.")
 
 
@@ -375,17 +377,26 @@ def _coords_to_urls(blob: str) -> set[str]:
     The installer prints one `group:artifact:version[:classifier]` per line
     before it starts downloading. Its own HTTP client is unreliable in
     sandboxed environments, so we resolve those coordinates ourselves via curl.
+
+    Coordinates are *searched for* rather than matched against the whole line.
+    The installer labels them as `Considering library net.fabricmc:...`, and an
+    anchored `fullmatch` rejected all 55 such lines in a NeoForge 26.2 run --
+    the harvest came back nearly empty and the install stalled on a jar we had
+    never been shown the coordinates for. The token itself is still validated,
+    so surrounding prose cannot be mistaken for a coordinate.
     """
     urls: set[str] = set()
-    for line in blob.splitlines():
-        line = line.strip()
-        if not re.fullmatch(r"[A-Za-z0-9_.\-]+:[A-Za-z0-9_.\-]+:[A-Za-z0-9_.\-]+(:[A-Za-z0-9_.\-]+)?", line):
-            continue
-        parts = line.split(":")
-        group, artifact, version = parts[0], parts[1], parts[2]
+    # "+" is legal inside a maven version (sponge-mixin 0.17.3+mixin.0.8.7).
+    # Leaving it out of the character class silently dropped every such
+    # coordinate, and the negative lookahead then had to guard the "..." that
+    # the version itself contains.
+    seg = r"[A-Za-z0-9_.+\-]+"
+    pattern = re.compile(
+        rf"({seg}):({seg}):({seg})(?::({seg}))?(?![\w.+\-])")
+    for group, artifact, version, classifier in pattern.findall(blob):
         ext = "jar"
         suffix = ""
-        if len(parts) > 3:
+        if classifier:
             # Classified artifacts used to be skipped on the assumption that a
             # server never needs one. NeoForge 26.2 disproves that: it fails
             # with "These libraries failed to download" for
@@ -393,7 +404,6 @@ def _coords_to_urls(blob: str) -> set[str]:
             # names coordinates rather than URLs -- so skipping them here left
             # the prefetcher with nothing to fetch and the install never
             # completed. Maven spells the `:api` classifier as an `-api` suffix.
-            classifier = parts[3]
             if classifier in {"api", "dev", "sources", "javadoc"}:
                 suffix = f"-{classifier}"
             else:
@@ -480,10 +490,29 @@ def _run_installer_once(instance: Path, jar: str, timeout: int) -> str:
         blob = ((exc.stdout or b"").decode("utf-8", "replace") if isinstance(
             exc.stdout, bytes) else (exc.stdout or ""))
         blob += "\n[aiom] installer exceeded its %ds budget; treating as partial\n" % timeout
-    log = instance / "installer.log"
-    if log.exists():
-        blob += log.read_text(encoding="utf-8", errors="replace")
+    # Each installer names its own log after its jar, and that log is where the
+    # full coordinate list lives. Reading a hardcoded `installer.log` found
+    # nothing for NeoForge (which writes `nf-installer.jar.log`), so the
+    # harvest silently ran on stdout alone and missed the labelled
+    # `Considering library ...` lines that carry most coordinates.
+    blob += _installer_logs_blob(instance)
     return blob
+
+
+def _installer_logs_blob(instance: Path) -> str:
+    """Concatenate every non-empty installer log in the instance directory.
+
+    Each toolchain names its log after its own jar (`nf-installer.jar.log`,
+    `forge-installer.log`), so no single hardcoded name is ever right.
+    """
+    parts: list[str] = []
+    for log in sorted(instance.glob("*.log")):
+        try:
+            if log.stat().st_size:
+                parts.append(log.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    return "\n".join(parts)
 
 
 def _run_installer(instance: Path, installer: Path, attempts: int = 2) -> str:

@@ -262,12 +262,77 @@ class MavenCoordinateTests(unittest.TestCase):
         self.assertIn("net/neoforged/fancymodloader/loader/11.0.16/"
                       "loader-11.0.16.jar", rel)
 
-    def test_non_coordinate_lines_are_ignored(self):
-        blob = ("Considering library net.neoforged:mergetool:2.0.7\n"
-                "File .\\libraries\\foo.jar exists. Checksum valid.\n"
-                "https://example.com/explicit.jar\n")
+    def test_labelled_coordinate_line_is_harvested(self):
+        # The installer labels coordinates as "Considering library <coord>".
+        # An anchored fullmatch rejected every one of those lines, so a real
+        # NeoForge 26.2 run harvested almost nothing and stalled on
+        # JarJarMetadata -- a jar whose coordinates it had printed itself.
+        urls = launcher._coords_to_urls(
+            "Considering library net.neoforged:JarJarMetadata:0.5.1")
+        self.assertIn("https://maven.neoforged.net/releases/"
+                      "net/neoforged/JarJarMetadata/0.5.1/"
+                      "JarJarMetadata-0.5.1.jar", urls)
+
+    def test_plus_in_version_is_kept(self):
+        # "+" is legal in a maven version. Omitting it from the character class
+        # dropped sponge-mixin 0.17.3+mixin.0.8.7, which the installer names.
+        urls = launcher._coords_to_urls(
+            "Considering library net.fabricmc:sponge-mixin:0.17.3+mixin.0.8.7")
+        rel = {launcher._maven_relpath(u) for u in urls}
+        self.assertIn("net/fabricmc/sponge-mixin/0.17.3+mixin.0.8.7/"
+                      "sponge-mixin-0.17.3+mixin.0.8.7.jar", rel)
+
+    def test_prose_around_a_coordinate_does_not_break_it(self):
+        blob = ("File .\\libraries\\net\\neoforged\\neoforge\\26.2.0.88\\"
+                "neoforge-26.2.0.88-universal.jar exists. Checksum valid.\n"
+                "These libraries failed to download. Try again.\n"
+                "net.neoforged:JarJarSelector:0.5.1\n")
         urls = launcher._coords_to_urls(blob)
-        self.assertNotIn("https://example.com/explicit.jar", urls)
+        self.assertIn("https://maven.neoforged.net/releases/"
+                      "net/neoforged/JarJarSelector/0.5.1/"
+                      "JarJarSelector-0.5.1.jar", urls)
+
+    def test_non_coordinate_lines_are_ignored(self):
+        blob = ("File .\\libraries\\foo.jar exists. Checksum valid.\n"
+                "https://example.com/explicit.jar\n"
+                "Done (4.277s)!\n")
+        urls = launcher._coords_to_urls(blob)
+        self.assertEqual(urls, set())
+
+    def test_bare_urls_are_still_collected(self):
+        blob = "downloading https://example.com/explicit.jar\n"
+        self.assertEqual(launcher._coords_to_urls(blob), set())
+
+
+class InstallerLogDiscoveryTests(unittest.TestCase):
+    """The installer's own log is named after its jar, not `installer.log`."""
+
+    def test_any_log_in_the_instance_is_read(self):
+        import tempfile
+        from pathlib import Path
+
+        from aiom.core import launcher as L
+
+        with tempfile.TemporaryDirectory() as td:
+            inst = Path(td)
+            (inst / "nf-installer.jar.log").write_text(
+                "Considering library net.neoforged:JarJarMetadata:0.5.1\n",
+                encoding="utf-8")
+
+            blob = L._installer_logs_blob(inst)
+            self.assertIn("JarJarMetadata", blob)
+
+    def test_missing_or_empty_logs_yield_empty_blob(self):
+        import tempfile
+        from pathlib import Path
+
+        from aiom.core import launcher as L
+
+        with tempfile.TemporaryDirectory() as td:
+            inst = Path(td)
+            self.assertEqual(L._installer_logs_blob(inst), "")
+            (inst / "forge-installer.log").write_text("", encoding="utf-8")
+            self.assertEqual(L._installer_logs_blob(inst), "")
 
 
 if __name__ == "__main__":
