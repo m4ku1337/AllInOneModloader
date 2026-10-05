@@ -59,7 +59,23 @@ jobs:
           AIOM_PREFETCH_TIMEOUT: '240'
           AIOM_PREFETCH_URL_TIMEOUT: '60'
           AIOM_PAPER_DOWNLOAD_TIMEOUT: '300'
-        run: python -m aiom.core.launcher ${{ matrix.loader }}
+        # The budgets above bound individual waits, but nothing bounds their
+        # sum, and a job killed at its limit loses its console log entirely.
+        # The outer `timeout` guarantees the step ends on its own with output
+        # intact, which is what makes a stall diagnosable instead of mute.
+        run: timeout --signal=TERM --kill-after=30 780 python -m aiom.core.launcher ${{ matrix.loader }}
+
+      # Dumping phases here is what makes a stall diagnosable: when the job is
+      # killed at its timeout GitHub discards the console log, so this step
+      # never gets to run and we are left with no evidence at all. Echoing the
+      # file into the surviving part of the log gives us the phase timeline
+      # even when everything after this point was lost.
+      - name: Dump phase timeline
+        if: always()
+        run: |
+          echo "--- phase timeline (${{ matrix.loader }}) ---"
+          cat .aiom/verify/${{ matrix.loader }}/logs/phases.log 2>/dev/null \
+            || echo "(no phases.log: the run died before the first checkpoint)"
 
       - name: Upload boot log
         if: always()
